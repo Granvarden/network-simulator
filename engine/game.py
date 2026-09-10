@@ -123,14 +123,25 @@ class GameManager:
 
             # 2. Laptop GUI Input routing
             if self.laptop_gui and self.laptop_gui.is_open:
-                if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.type in (pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
                     tx = (self.window.width - self.laptop_gui.width) // 2
                     ty = (self.window.height - self.laptop_gui.height) // 2
                     local_pos = (event.pos[0] - tx, event.pos[1] - ty)
-                    self.laptop_gui.handle_mouse_down(local_pos, event.button)
-                    if not self.laptop_gui.is_open:
-                        self.laptop_gui = None
-                        self.window.capture_mouse(True)
+
+                    if event.type == pygame.MOUSEMOTION:
+                        self.laptop_gui.handle_mouse_motion(local_pos)
+                    elif event.type == pygame.MOUSEBUTTONDOWN:
+                        # Check if clicked outside laptop chassis -> dismiss
+                        if (local_pos[0] < 0 or local_pos[0] > self.laptop_gui.width or
+                                local_pos[1] < 0 or local_pos[1] > self.laptop_gui.height):
+                            self.laptop_gui.close()
+                            self.laptop_gui = None
+                            self.window.capture_mouse(True)
+                        else:
+                            self.laptop_gui.handle_mouse_down(local_pos, event.button)
+                            if not self.laptop_gui.is_open:
+                                self.laptop_gui = None
+                                self.window.capture_mouse(True)
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE and self.laptop_gui.active_app is None:
                         self.laptop_gui.close()

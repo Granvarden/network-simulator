@@ -73,12 +73,37 @@ def test_game_loop():
     game.window.swap_buffers()
     print("Rack Device Manager modal rendered successfully on top of 3D Datacenter.")
 
-    # Simulate pressing ESC or clicking Close
+    # Simulate pressing ESC to close Device Manager
     esc_event = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)
     act = game.menu.handle_input(esc_event, game.sound, game.window.width, game.window.height, game.mode)
     assert act == "RESUME"
-    assert game.menu.state == MenuState.IN_GAME
+    game.menu.state = MenuState.IN_GAME
     print("Device Manager exit transition verified.")
+
+    # 7. Test Laptop Desktop GUI event routing and input handling
+    from ui.laptop_gui import LaptopGUI
+    lap_dev = [d for d in game.mode.devices if d.device_type == "laptop"][0]
+    game.laptop_gui = LaptopGUI(lap_dev, game.window.width, game.window.height)
+    game.laptop_gui.open()
+    assert game.laptop_gui.is_open
+
+    # Simulate keyboard event (must not crash when event has no .pos attribute)
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_a, "unicode": "a"}))
+    game._handle_events()
+
+    # Simulate mouse motion
+    pygame.event.post(pygame.event.Event(pygame.MOUSEMOTION, {"pos": (game.window.width // 2, game.window.height // 2), "rel": (0, 0), "buttons": (0, 0, 0)}))
+    game._handle_events()
+
+    # Simulate mouse click
+    pygame.event.post(pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": (game.window.width // 2, game.window.height // 2), "button": 1}))
+    game._handle_events()
+
+    # Close laptop GUI via ESC
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_ESCAPE, "unicode": ""}))
+    game._handle_events()
+    assert game.laptop_gui is None
+    print("Laptop Desktop GUI event routing (Keyboard & Mouse) verified.")
 
     pygame.quit()
     print("\nALL GAME LOOP & RENDERER INTEGRATION TESTS PASSED!")

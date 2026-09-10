@@ -60,7 +60,7 @@ class SandboxMode(BaseMode):
         fw1.pos_x, fw1.pos_y, fw1.pos_z = self.calculate_rack_position(2, 34)
 
         # ISP WAN Uplink Gateway (Public IP 203.0.113.1)
-        isp = Host("isp1", hostname="ISP-Gateway-Uplink", device_type="server", rack_id=2, u_slot=40)
+        isp = Host("isp1", hostname="ISP-Gateway-Uplink", device_type="isp_gateway", rack_id=2, u_slot=40)
         isp.pos_x, isp.pos_y, isp.pos_z = self.calculate_rack_position(2, 40)
         isp.configure_ip("203.0.113.1", "255.255.255.0", gateway="203.0.113.1")
 
@@ -110,7 +110,7 @@ class SandboxMode(BaseMode):
             if exclude_dev_id and dev.id == exclude_dev_id:
                 continue
 
-            dev_span = 1 if dev.device_type in ("switch", "firewall") else 2
+            dev_span = 1 if dev.device_type in ("switch", "firewall", "isp_gateway", "isp") else 2
             dev_min = dev.u_slot
             dev_max = dev.u_slot + dev_span - 1
 
@@ -126,7 +126,7 @@ class SandboxMode(BaseMode):
         if rack_id not in (1, 2, 3):
             return False, f"Invalid Rack ID: {rack_id}. Choose 1, 2, or 3.", None
 
-        needed_u = 1 if device_type in ("switch", "firewall") else 2
+        needed_u = 1 if device_type in ("switch", "firewall", "isp_gateway", "isp") else 2
         if u_slot < 1 or u_slot + needed_u - 1 > 42:
             return False, f"Slot {u_slot}U exceeds rack boundaries (1-42U).", None
 
@@ -304,6 +304,12 @@ class SandboxMode(BaseMode):
                 elif d_type == "laptop":
                     dev = Host(d_id, hostname=d_host, device_type="laptop", rack_id=d_rack, u_slot=d_slot,
                                os_type=dev_data.get("os_type", "windows"))
+                    if "gateway" in dev_data:
+                        dev.default_gateway = dev_data["gateway"]
+                    if "dns_server" in dev_data:
+                        dev.dns_server = dev_data["dns_server"]
+                elif d_type in ("isp_gateway", "isp"):
+                    dev = Host(d_id, hostname=d_host, device_type="isp_gateway", rack_id=d_rack, u_slot=d_slot)
                     if "gateway" in dev_data:
                         dev.default_gateway = dev_data["gateway"]
                     if "dns_server" in dev_data:

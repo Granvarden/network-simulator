@@ -764,6 +764,10 @@ class MenuManager:
                 badge_bg = (255, 236, 238)
                 badge_tc = (195, 30, 45)
                 badge_text = "FIREWALL"
+            elif dev.device_type in ("isp_gateway", "isp") or (dev.device_type == "server" and "isp" in dev.hostname.lower()):
+                badge_bg = (230, 248, 255)
+                badge_tc = (0, 130, 180)
+                badge_text = "ISP WAN"
             elif dev.device_type == "server":
                 badge_bg = (242, 244, 248)
                 badge_tc = (65, 75, 95)
@@ -779,7 +783,7 @@ class MenuManager:
             surface.blit(h_s, (row_r.x + 80, row_r.y + 8))
 
             # Location & Port info
-            span = 1 if dev.device_type in ("switch", "firewall") else 2
+            span = 1 if dev.device_type in ("switch", "firewall", "isp_gateway", "isp") else 2
             loc_str = f"RACK-0{dev.rack_id} (Slot {dev.u_slot}U" + (f"-{dev.u_slot+1}U" if span > 1 else "U") + ")"
             active_links = sum(1 for p in dev.ports.values() if p.cable)
             port_str = f"Ports: {len(dev.ports)} ({active_links} cabled)"

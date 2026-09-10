@@ -52,6 +52,7 @@ class TerminalUI:
         self.COLOR_SHADOW = (180, 195, 215, 120)
 
         self.is_open = False
+        self._last_key_sound_time = 0.0
 
         # Real-time interactive job state (e.g. progressive ping execution)
         self.active_job = None
@@ -64,13 +65,21 @@ class TerminalUI:
         self.active_job_line_idx = None
         self.active_job_cmd = ""
 
+    def _play_key_sound(self):
+        now = time.time()
+        if now - self._last_key_sound_time >= 0.05:
+            self.sound.play_key()
+            self._last_key_sound_time = now
+
     def open(self):
         self.is_open = True
         self.input_buffer = ""
         self.cursor_pos = 0
+        pygame.key.set_repeat(280, 28)
 
     def close(self):
         self.is_open = False
+        pygame.key.set_repeat(0)
 
     def abort_job(self):
         """Aborts currently active running job (Ctrl+C / Escape)."""
@@ -241,12 +250,12 @@ class TerminalUI:
             if self.cursor_pos > 0:
                 self.input_buffer = self.input_buffer[:self.cursor_pos-1] + self.input_buffer[self.cursor_pos:]
                 self.cursor_pos -= 1
-                self.sound.play_key()
+                self._play_key_sound()
 
         elif event.key == pygame.K_DELETE:
             if self.cursor_pos < len(self.input_buffer):
                 self.input_buffer = self.input_buffer[:self.cursor_pos] + self.input_buffer[self.cursor_pos+1:]
-                self.sound.play_key()
+                self._play_key_sound()
 
         elif event.key == pygame.K_LEFT:
             if self.cursor_pos > 0:
@@ -302,7 +311,7 @@ class TerminalUI:
                                      event.unicode +
                                      self.input_buffer[self.cursor_pos:])
                 self.cursor_pos += len(event.unicode)
-                self.sound.play_key()
+                self._play_key_sound()
 
     def render(self):
         self.surface.fill((0, 0, 0, 0))

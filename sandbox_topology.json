@@ -1,4 +1,535 @@
 {
-  "devices": [],
-  "cables": []
+  "devices": [
+    {
+      "id": "sw1",
+      "hostname": "Core-Switch-01",
+      "type": "switch",
+      "rack_id": 1,
+      "u_slot": 24,
+      "num_ports": 8,
+      "ports": {
+        "g0/1": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/2": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/3": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/4": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/5": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/6": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/7": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/8": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "trunk",
+          "vlan": 1
+        },
+        "con0": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        }
+      },
+      "vlans": {
+        "1": {
+          "name": "default",
+          "status": "active"
+        }
+      }
+    },
+    {
+      "id": "sw2",
+      "hostname": "Dist-Switch-02",
+      "type": "switch",
+      "rack_id": 1,
+      "u_slot": 18,
+      "num_ports": 8,
+      "ports": {
+        "g0/1": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/2": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/3": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/4": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/5": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/6": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/7": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/8": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "trunk",
+          "vlan": 1
+        },
+        "con0": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        }
+      },
+      "vlans": {
+        "1": {
+          "name": "default",
+          "status": "active"
+        }
+      }
+    },
+    {
+      "id": "srv1",
+      "hostname": "App-Server-01",
+      "type": "server",
+      "rack_id": 1,
+      "u_slot": 8,
+      "num_ports": 1,
+      "ports": {
+        "eth0": {
+          "ip": "192.168.10.10",
+          "mask": "255.255.255.0",
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        }
+      },
+      "gateway": "192.168.10.1",
+      "os_type": "ubuntu",
+      "dns_server": "8.8.8.8",
+      "pos": [
+        -1.4,
+        0.49,
+        -1.5
+      ]
+    },
+    {
+      "id": "rtr1",
+      "hostname": "Core-Router-01",
+      "type": "router",
+      "rack_id": 2,
+      "u_slot": 28,
+      "num_ports": 4,
+      "ports": {
+        "g0/0": {
+          "ip": "203.0.113.2",
+          "mask": "255.255.255.0",
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/1": {
+          "ip": "192.168.1.1",
+          "mask": "255.255.255.0",
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/2": {
+          "ip": null,
+          "mask": null,
+          "shutdown": true,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/3": {
+          "ip": null,
+          "mask": null,
+          "shutdown": true,
+          "mode": "access",
+          "vlan": 1
+        },
+        "con0": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        }
+      },
+      "routes": [],
+      "nat_inside": [],
+      "nat_outside": [],
+      "nat_rules": [],
+      "access_lists": {}
+    },
+    {
+      "id": "rtr2",
+      "hostname": "Edge-Router-02",
+      "type": "router",
+      "rack_id": 2,
+      "u_slot": 20,
+      "num_ports": 4,
+      "ports": {
+        "g0/0": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/1": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/2": {
+          "ip": null,
+          "mask": null,
+          "shutdown": true,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/3": {
+          "ip": null,
+          "mask": null,
+          "shutdown": true,
+          "mode": "access",
+          "vlan": 1
+        },
+        "con0": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        }
+      },
+      "routes": [],
+      "nat_inside": [],
+      "nat_outside": [],
+      "nat_rules": [],
+      "access_lists": {}
+    },
+    {
+      "id": "fw1",
+      "hostname": "Edge-ASA-5506",
+      "type": "firewall",
+      "rack_id": 2,
+      "u_slot": 34,
+      "num_ports": 7,
+      "ports": {
+        "g0/0": {
+          "ip": null,
+          "mask": null,
+          "shutdown": true,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/1": {
+          "ip": null,
+          "mask": null,
+          "shutdown": true,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/2": {
+          "ip": null,
+          "mask": null,
+          "shutdown": true,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/3": {
+          "ip": null,
+          "mask": null,
+          "shutdown": true,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/4": {
+          "ip": null,
+          "mask": null,
+          "shutdown": true,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/5": {
+          "ip": null,
+          "mask": null,
+          "shutdown": true,
+          "mode": "access",
+          "vlan": 1
+        },
+        "m0/0": {
+          "ip": null,
+          "mask": null,
+          "shutdown": true,
+          "mode": "access",
+          "vlan": 1
+        },
+        "con0": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        }
+      },
+      "nameif": {
+        "g0/0": "outside",
+        "g0/1": "inside",
+        "g0/2": "dmz"
+      },
+      "security_levels": {
+        "outside": 0,
+        "inside": 100,
+        "dmz": 50
+      },
+      "routes": [],
+      "access_lists": {},
+      "access_groups": {}
+    },
+    {
+      "id": "isp1",
+      "hostname": "ISP-Gateway-Uplink",
+      "type": "isp_gateway",
+      "rack_id": 2,
+      "u_slot": 40,
+      "num_ports": 1,
+      "ports": {
+        "eth0": {
+          "ip": "203.0.113.1",
+          "mask": "255.255.255.0",
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        }
+      },
+      "gateway": "203.0.113.1",
+      "os_type": "ubuntu",
+      "dns_server": "8.8.8.8",
+      "pos": [
+        0.0,
+        1.9,
+        -1.5
+      ]
+    },
+    {
+      "id": "db1",
+      "hostname": "DB-Cluster-01",
+      "type": "server",
+      "rack_id": 3,
+      "u_slot": 24,
+      "num_ports": 1,
+      "ports": {
+        "eth0": {
+          "ip": "192.168.20.10",
+          "mask": "255.255.255.0",
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        }
+      },
+      "gateway": "192.168.20.1",
+      "os_type": "ubuntu",
+      "dns_server": "8.8.8.8",
+      "pos": [
+        1.4,
+        1.2,
+        -1.5
+      ]
+    },
+    {
+      "id": "san1",
+      "hostname": "SAN-Storage-01",
+      "type": "server",
+      "rack_id": 3,
+      "u_slot": 14,
+      "num_ports": 1,
+      "ports": {
+        "eth0": {
+          "ip": "192.168.30.50",
+          "mask": "255.255.255.0",
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        }
+      },
+      "gateway": "192.168.30.1",
+      "os_type": "ubuntu",
+      "dns_server": "8.8.8.8",
+      "pos": [
+        1.4,
+        0.76,
+        -1.5
+      ]
+    },
+    {
+      "id": "lap1",
+      "hostname": "Win-Laptop-01",
+      "type": "laptop",
+      "rack_id": 0,
+      "u_slot": 0,
+      "num_ports": 1,
+      "ports": {
+        "eth0": {
+          "ip": "192.168.1.99",
+          "mask": "255.255.255.0",
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "con0": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        }
+      },
+      "gateway": "192.168.1.1",
+      "os_type": "windows",
+      "dns_server": "8.8.8.8",
+      "pos": [
+        -3.55,
+        0.77,
+        0.5
+      ]
+    },
+    {
+      "id": "lap2",
+      "hostname": "Ubuntu-Laptop-02",
+      "type": "laptop",
+      "rack_id": 0,
+      "u_slot": 0,
+      "num_ports": 1,
+      "ports": {
+        "eth0": {
+          "ip": "192.168.1.100",
+          "mask": "255.255.255.0",
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "con0": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        }
+      },
+      "gateway": "192.168.1.1",
+      "os_type": "ubuntu",
+      "dns_server": "8.8.8.8",
+      "pos": [
+        -2.85,
+        0.77,
+        0.5
+      ]
+    }
+  ],
+  "cables": [
+    {
+      "from_dev": "sw1",
+      "from_port": "g0/8",
+      "to_dev": "sw2",
+      "to_port": "g0/8",
+      "type": "CAT6"
+    },
+    {
+      "from_dev": "rtr1",
+      "from_port": "g0/0",
+      "to_dev": "isp1",
+      "to_port": "eth0",
+      "type": "CAT6"
+    },
+    {
+      "from_dev": "lap1",
+      "from_port": "con0",
+      "to_dev": "rtr2",
+      "to_port": "g0/0",
+      "type": "CONSOLE"
+    },
+    {
+      "from_dev": "rtr1",
+      "from_port": "g0/1",
+      "to_dev": "rtr2",
+      "to_port": "g0/1",
+      "type": "CAT6"
+    }
+  ]
 }

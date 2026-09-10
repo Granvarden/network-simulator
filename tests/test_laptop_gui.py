@@ -197,11 +197,200 @@ def test_game_modes_have_dual_laptops():
 
     print("  -> All game modes have dual Windows 11 & Ubuntu 22.04 laptops verified!")
 
+def test_laptop_gui_click_hitboxes():
+    print("[TEST] Laptop Desktop GUI Click Hitbox & Interaction Verification...")
+    win_lap = Host("lap_win", hostname="Win-Laptop-01", device_type="laptop", os_type="windows")
+    ubu_lap = Host("lap_ubu", hostname="Ubuntu-Laptop-02", device_type="laptop", os_type="ubuntu")
+
+    gui_win = LaptopGUI(win_lap, 1280, 720)
+    gui_win.open()
+    L_win = gui_win.layout
+
+    # 1. Test clicking Windows Desktop Icons (Edge, Settings, PuTTY, Terminal)
+    edge_rect = L_win["desktop_icons"]["browser"]
+    gui_win.handle_mouse_down((edge_rect.centerx, edge_rect.centery), 1)
+    assert gui_win.active_app == "browser", "Clicking Edge desktop icon must open browser"
+
+    close_btn = L_win["window_close_btn"]
+    gui_win.handle_mouse_down((close_btn.centerx, close_btn.centery), 1)
+    assert gui_win.active_app is None, "Clicking [X] must close active application"
+
+    net_rect = L_win["desktop_icons"]["network_settings"]
+    gui_win.handle_mouse_down((net_rect.centerx, net_rect.centery), 1)
+    assert gui_win.active_app == "network_settings", "Clicking Settings desktop icon must open network settings"
+    gui_win.handle_mouse_down((close_btn.centerx, close_btn.centery), 1)
+    assert gui_win.active_app is None
+
+    putty_rect = L_win["desktop_icons"]["putty"]
+    gui_win.handle_mouse_down((putty_rect.centerx, putty_rect.centery), 1)
+    assert gui_win.active_app == "putty", "Clicking PuTTY desktop icon must open putty"
+    gui_win.handle_mouse_down((close_btn.centerx, close_btn.centery), 1)
+    assert gui_win.active_app is None
+
+    term_rect = L_win["desktop_icons"]["terminal"]
+    gui_win.handle_mouse_down((term_rect.centerx, term_rect.centery), 1)
+    assert gui_win.active_app == "terminal", "Clicking Terminal desktop icon must open terminal"
+    gui_win.handle_mouse_down((close_btn.centerx, close_btn.centery), 1)
+    assert gui_win.active_app is None
+
+    # 2. Test Taskbar Icons and app-switching while window is open
+    tb_icons = L_win["taskbar_icons"]
+    gui_win.handle_mouse_down((tb_icons["browser"].centerx, tb_icons["browser"].centery), 1)
+    assert gui_win.active_app == "browser", "Clicking Taskbar Edge must open browser"
+
+    gui_win.handle_mouse_down((tb_icons["network_settings"].centerx, tb_icons["network_settings"].centery), 1)
+    assert gui_win.active_app == "network_settings", "Clicking Taskbar Settings must switch directly to network settings"
+
+    gui_win.handle_mouse_down((tb_icons["putty"].centerx, tb_icons["putty"].centery), 1)
+    assert gui_win.active_app == "putty", "Clicking Taskbar PuTTY must switch directly to putty"
+
+    gui_win.handle_mouse_down((tb_icons["terminal"].centerx, tb_icons["terminal"].centery), 1)
+    assert gui_win.active_app == "terminal", "Clicking Taskbar Terminal must switch directly to terminal"
+
+    gui_win.handle_mouse_down((tb_icons["start"].centerx, tb_icons["start"].centery), 1)
+    assert gui_win.active_app is None, "Clicking Start button must return to desktop"
+
+    # 3. Test Web Browser Controls (URL Bar, Go button, Bookmarks)
+    gui_win.active_app = "browser"
+    B = L_win["browser"]
+
+    gui_win.handle_mouse_down((B["bm_router"].centerx, B["bm_router"].centery), 1)
+    assert "192.168.1.1" in gui_win.browser_url
+
+    gui_win.handle_mouse_down((B["bm_server"].centerx, B["bm_server"].centery), 1)
+    assert "192.168.1.10" in gui_win.browser_url
+
+    gui_win.handle_mouse_down((B["bm_asa"].centerx, B["bm_asa"].centery), 1)
+    assert "203.0.113.1" in gui_win.browser_url
+
+    gui_win.handle_mouse_down((B["bm_google"].centerx, B["bm_google"].centery), 1)
+    assert "8.8.8.8" in gui_win.browser_url
+
+    gui_win.handle_mouse_down((B["url_bar"].centerx, B["url_bar"].centery), 1)
+    assert gui_win.browser_url_active is True, "Clicking URL bar must activate input"
+
+    gui_win.browser_input = "http://192.168.1.200"
+    gui_win.handle_mouse_down((B["go_btn"].centerx, B["go_btn"].centery), 1)
+    assert gui_win.browser_url == "http://192.168.1.200", "Clicking Go button must navigate to typed URL"
+    assert gui_win.browser_url_active is False
+
+    # 4. Test Network Settings Form Inputs & Apply Button
+    gui_win.active_app = "network_settings"
+    N = L_win["network"]
+
+    gui_win.handle_mouse_down((N["field_ip"].centerx, N["field_ip"].centery), 1)
+    assert gui_win.active_field == "ip", "Clicking IP field must activate IP input"
+
+    gui_win.handle_mouse_down((N["field_mask"].centerx, N["field_mask"].centery), 1)
+    assert gui_win.active_field == "mask", "Clicking Mask field must activate mask input"
+
+    gui_win.handle_mouse_down((N["field_gw"].centerx, N["field_gw"].centery), 1)
+    assert gui_win.active_field == "gw", "Clicking GW field must activate gateway input"
+
+    gui_win.handle_mouse_down((N["field_dns"].centerx, N["field_dns"].centery), 1)
+    assert gui_win.active_field == "dns", "Clicking DNS field must activate dns input"
+
+    gui_win.net_ip = "192.168.1.77"
+    gui_win.handle_mouse_down((N["btn_apply"].centerx, N["btn_apply"].centery), 1)
+    assert win_lap.eth0.ip_address == "192.168.1.77", "Clicking Apply Changes must update device IP"
+    assert gui_win.settings_banner is not None
+
+    # 5. Test Ubuntu Dock Launchers
+    gui_ubu = LaptopGUI(ubu_lap, 1280, 720)
+    gui_ubu.open()
+    L_ubu = gui_ubu.layout
+    d_icons = L_ubu["dock_icons"]
+
+    gui_ubu.handle_mouse_down((d_icons["browser"].centerx, d_icons["browser"].centery), 1)
+    assert gui_ubu.active_app == "browser", "Clicking Ubuntu Firefox dock icon must open browser"
+
+    gui_ubu.handle_mouse_down((d_icons["network_settings"].centerx, d_icons["network_settings"].centery), 1)
+    assert gui_ubu.active_app == "network_settings", "Clicking Ubuntu Settings dock icon must switch to settings"
+
+    gui_ubu.handle_mouse_down((d_icons["putty"].centerx, d_icons["putty"].centery), 1)
+    assert gui_ubu.active_app == "putty", "Clicking Ubuntu Minicom dock icon must switch to putty"
+
+    gui_ubu.handle_mouse_down((d_icons["terminal"].centerx, d_icons["terminal"].centery), 1)
+    assert gui_ubu.active_app == "terminal", "Clicking Ubuntu Terminal dock icon must switch to terminal"
+
+    act_btn = L_ubu["activities_btn"]
+    gui_ubu.handle_mouse_down((act_btn.centerx, act_btn.centery), 1)
+    assert gui_ubu.active_app is None, "Clicking Activities button must minimize window"
+
+    # 6. Test Detach Laptop button
+    detach_btn = L_win["detach_btn"]
+    gui_win.handle_mouse_down((detach_btn.centerx, detach_btn.centery), 1)
+    assert gui_win.is_open is False, "Clicking Detach Laptop button must close laptop GUI"
+    print("  -> All Laptop GUI Click Hitboxes, App Switching, and Form Inputs verified 100%!")
+
+def test_continuous_backspace_repeat():
+    print("[TEST] Continuous Backspace & Keyboard Auto-Repeat Verification...")
+    win_lap = Host("lap_win", hostname="Win-Laptop-01", device_type="laptop", os_type="windows")
+    gui_win = LaptopGUI(win_lap, 1280, 720)
+
+    # 1. Opening Laptop GUI enables auto-repeat
+    gui_win.open()
+    repeat_delay, repeat_interval = pygame.key.get_repeat()
+    assert repeat_delay > 0 and repeat_interval > 0, f"Key repeat must be active on open(), got: ({repeat_delay}, {repeat_interval})"
+
+    # 2. Test continuous Backspace on Browser URL Bar
+    gui_win.active_app = "browser"
+    gui_win.browser_url_active = True
+    gui_win.browser_input = "http://192.168.1.1"
+    ev_backspace = pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_BACKSPACE, "unicode": ""})
+
+    # Simulate holding backspace (repeated KEYDOWN events)
+    for _ in range(4):
+        gui_win.handle_key(ev_backspace)
+    assert gui_win.browser_input == "http://192.168", f"Expected 'http://192.168', got '{gui_win.browser_input}'"
+
+    # Delete all remaining characters
+    for _ in range(30):
+        gui_win.handle_key(ev_backspace)
+    assert gui_win.browser_input == "", f"Expected empty input after holding backspace, got '{gui_win.browser_input}'"
+
+    # 3. Test continuous Backspace on Network Settings Fields
+    gui_win.active_app = "network_settings"
+    gui_win.active_field = "ip"
+    gui_win.net_ip = "192.168.1.150"
+    for _ in range(3):
+        gui_win.handle_key(ev_backspace)
+    assert gui_win.net_ip == "192.168.1.", f"Expected '192.168.1.', got '{gui_win.net_ip}'"
+
+    gui_win.active_field = "mask"
+    gui_win.net_mask = "255.255.255.0"
+    for _ in range(20):
+        gui_win.handle_key(ev_backspace)
+    assert gui_win.net_mask == ""
+
+    # 4. Closing Laptop GUI disables auto-repeat for 3D navigation
+    gui_win.close()
+    assert pygame.key.get_repeat() == (0, 0), "Key repeat must be disabled when laptop closes"
+
+    # 5. Test TerminalUI key repeat and continuous backspace
+    from cli.terminal_ui import TerminalUI
+    term = TerminalUI(win_lap, 800, 500)
+    term.open()
+    assert pygame.key.get_repeat() != (0, 0), "Key repeat must be active when TerminalUI opens"
+
+    term.input_buffer = "configure terminal"
+    term.cursor_pos = len(term.input_buffer)
+    for _ in range(9):
+        term.handle_key(ev_backspace)
+    assert term.input_buffer == "configure", f"Expected 'configure', got '{term.input_buffer}'"
+
+    term.close()
+    assert pygame.key.get_repeat() == (0, 0), "Key repeat must be disabled when TerminalUI closes"
+    print("  -> Continuous Backspace and auto-repeat verified across all UI inputs!")
+
 if __name__ == "__main__":
     test_dual_laptop_creation()
     test_laptop_gui_rendering()
+    test_laptop_gui_click_hitboxes()
+    test_continuous_backspace_repeat()
     test_network_settings_reconfiguration()
     test_web_browser()
     test_putty_serial_console()
     test_game_modes_have_dual_laptops()
     print("\n[SUCCESS] All Laptop & Desktop GUI test suites passed flawlessly!")
+

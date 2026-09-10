@@ -191,7 +191,12 @@ class HUD:
         header_h = 28
         pygame.draw.rect(surface, (235, 244, 255), (x, y, w, header_h), border_top_left_radius=8, border_top_right_radius=8)
 
-        badge_txt = dev.device_type.upper()
+        if dev.device_type in ("isp_gateway", "isp") or (dev.device_type == "server" and "isp" in dev.hostname.lower()):
+            badge_txt = "ISP WAN"
+            badge_col = (0, 150, 200)
+        else:
+            badge_txt = dev.device_type.upper()
+            badge_col = (0, 115, 230)
         title = f"INSPECT: {dev.hostname}"
         t_surf = self.font_bold.render(title, True, (0, 75, 160))
         surface.blit(t_surf, (x + 10, y + 5))
@@ -200,7 +205,7 @@ class HUD:
         b_surf = self.font_small.render(badge_txt, True, (255, 255, 255))
         bw = b_surf.get_width() + 10
         bx = x + w - bw - 8
-        pygame.draw.rect(surface, (0, 115, 230), (bx, y + 4, bw, 20), border_radius=4)
+        pygame.draw.rect(surface, badge_col, (bx, y + 4, bw, 20), border_radius=4)
         surface.blit(b_surf, (bx + 5, y + 6))
 
         # Device details
