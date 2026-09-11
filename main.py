@@ -6,6 +6,18 @@ Datacenter Cabling, and Step-by-Step Training in Pygame + PyOpenGL.
 
 import sys
 import pygame
+
+# Enable High-DPI Awareness on Windows before creating display
+if sys.platform == "win32":
+    try:
+        import ctypes
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per-Monitor DPI aware
+        except Exception:
+            ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
 from engine.game import GameManager
 
 def main():

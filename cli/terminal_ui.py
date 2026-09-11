@@ -11,7 +11,7 @@ from .command_parser import CommandParser
 from engine.audio import SoundManager
 
 class TerminalUI:
-    def __init__(self, device, width=880, height=540):
+    def __init__(self, device, width=860, height=560, x=None, y=None):
         self.device = device
         self.executor = CommandExecutor(device)
         self.parser = CommandParser(self.executor)
@@ -20,13 +20,23 @@ class TerminalUI:
 
         self.width = width
         self.height = height
+        self.x = x if x is not None else 80
+        self.y = y if y is not None else 60
         self.surface = pygame.Surface((width, height), pygame.SRCALPHA)
+
+        # Drag & mouse interaction state
+        self.is_dragging = False
+        self.drag_offset_x = 0
+        self.drag_offset_y = 0
+        self.detach_btn_rect = pygame.Rect(self.width - 190, 4, 150, 24)
+        self.close_btn_rect = pygame.Rect(self.width - 34, 4, 26, 24)
 
         # Monospace font
         if not pygame.font.get_init():
             pygame.font.init()
         self.font = pygame.font.SysFont("Consolas", 15) or pygame.font.Font(None, 18)
         self.title_font = pygame.font.SysFont("Segoe UI", 13, bold=True) or pygame.font.Font(None, 16)
+        self.btn_font = pygame.font.SysFont("Segoe UI", 11, bold=True) or pygame.font.Font(None, 14)
 
         # Text & buffer management
         self.history_lines = [
@@ -82,10 +92,71 @@ class TerminalUI:
 
     def close(self):
         self.is_open = False
+        self.is_dragging = False
         try:
             pygame.key.set_repeat(0)
         except pygame.error:
             pass
+
+    def handle_mouse_down(self, mouse_pos, button):
+        """Handles mouse clicks on the terminal (dragging title bar, close/detach buttons, wheel scrolling)."""
+        if not self.is_open:
+            return False
+
+        mx, my = mouse_pos
+        local_x = mx - self.x
+        local_y = my - self.y
+
+        # Only process if clicked inside this terminal window
+        if not (0 <= local_x <= self.width and 0 <= local_y <= self.height):
+            return False
+
+        if button == 1:
+            # Clicked within header bar
+            if 0 <= local_y <= 32:
+                # Check detach / close buttons
+                if self.detach_btn_rect.collidepoint(local_x, local_y) or self.close_btn_rect.collidepoint(local_x, local_y):
+                    if not self.active_job:
+                        self.close()
+                    else:
+                        self.abort_job()
+                    return True
+
+                # Otherwise, start dragging title bar
+                self.is_dragging = True
+                self.drag_offset_x = mx - self.x
+                self.drag_offset_y = my - self.y
+                return True
+        elif button == 4:  # Wheel up
+            self.scroll_offset = min(max(0, len(self.history_lines) - 5), self.scroll_offset + 3)
+            return True
+        elif button == 5:  # Wheel down
+            self.scroll_offset = max(0, self.scroll_offset - 3)
+            return True
+
+        return True
+
+    def handle_mouse_up(self, mouse_pos, button):
+        """Handles mouse release (stops dragging)."""
+        if button == 1:
+            self.is_dragging = False
+
+    def handle_mouse_motion(self, mouse_pos, screen_w=1920, screen_h=1080):
+        """Handles mouse movement during title bar dragging."""
+        if self.is_dragging:
+            mx, my = mouse_pos
+            new_x = mx - self.drag_offset_x
+            new_y = my - self.drag_offset_y
+            # Clamp so terminal window stays visible and usable on screen
+            self.x = max(10 - self.width + 120, min(screen_w - 120, new_x))
+            self.y = max(10, min(screen_h - 40, new_y))
+
+    def handle_mouse_wheel(self, dy):
+        """Handles Pygame 2 mouse wheel scrolling."""
+        if dy > 0:
+            self.scroll_offset = min(max(0, len(self.history_lines) - 5), self.scroll_offset + 3)
+        elif dy < 0:
+            self.scroll_offset = max(0, self.scroll_offset - 3)
 
     def abort_job(self):
         """Aborts currently active running job (Ctrl+C / Escape)."""
@@ -331,14 +402,31 @@ class TerminalUI:
         pygame.draw.rect(self.surface, self.COLOR_HEADER, (0, 0, w, 32), border_top_left_radius=8, border_top_right_radius=8)
         pygame.draw.line(self.surface, self.COLOR_BORDER, (0, 32), (w, 32), 1)
 
+        # Drag Grip dots on left of header
+        for row in (10, 16, 22):
+            for col in (10, 15):
+                pygame.draw.rect(self.surface, (150, 175, 205), (col, row, 2, 2))
+
         # Window Title & Connection Status
         status_suffix = " [Executing...]" if self.active_job else f" - Mode: {self.executor.mode}"
-        title = f"CONSOLE TERMINAL: {self.device.hostname} [Port: Con0 - 9600 baud]{status_suffix}"
+        title = f"CONSOLE: {self.device.hostname} [Port: Con0]{status_suffix}"
         t_surf = self.title_font.render(title, True, self.COLOR_TITLE)
-        self.surface.blit(t_surf, (14, 8))
+        self.surface.blit(t_surf, (24, 7))
 
-        close_hint = self.title_font.render("[ESC] Detach Terminal", True, (90, 115, 145))
-        self.surface.blit(close_hint, (w - 180, 8))
+        # Detach and Close buttons on the right of header bar
+        btn_w = 145
+        btn_x = w - btn_w - 36
+        self.detach_btn_rect = pygame.Rect(btn_x, 4, btn_w, 24)
+        pygame.draw.rect(self.surface, (222, 234, 250), self.detach_btn_rect, border_radius=4)
+        pygame.draw.rect(self.surface, (180, 205, 238), self.detach_btn_rect, width=1, border_radius=4)
+        close_hint = self.btn_font.render("[ESC] Detach Terminal", True, (30, 75, 140))
+        self.surface.blit(close_hint, (btn_x + 8, 8))
+
+        self.close_btn_rect = pygame.Rect(w - 30, 4, 24, 24)
+        pygame.draw.rect(self.surface, (238, 242, 250), self.close_btn_rect, border_radius=4)
+        pygame.draw.rect(self.surface, (180, 205, 238), self.close_btn_rect, width=1, border_radius=4)
+        x_surf = self.title_font.render("X", True, (100, 130, 170))
+        self.surface.blit(x_surf, (w - 23, 7))
 
         # Terminal Content Area
         line_height = 20
@@ -372,5 +460,20 @@ class TerminalUI:
                     cursor_x_offset = self.font.size(self.input_buffer[:self.cursor_pos])[0]
                     cursor_rect = pygame.Rect(14 + p_w + cursor_x_offset, y + 2, 8, line_height - 4)
                     pygame.draw.rect(self.surface, self.COLOR_CURSOR, cursor_rect)
+
+        # Subtle Scrollbar Track and Thumb
+        if len(self.history_lines) > max_visible_lines:
+            sb_track_h = h - 50
+            sb_w = 4
+            sb_x = w - 8
+            sb_y = 40
+            pygame.draw.rect(self.surface, (230, 238, 248), (sb_x, sb_y, sb_w, sb_track_h), border_radius=2)
+
+            thumb_ratio = min(1.0, max_visible_lines / len(self.history_lines))
+            thumb_h = max(18, int(sb_track_h * thumb_ratio))
+            max_scroll = len(self.history_lines) - max_visible_lines
+            thumb_pos_ratio = (max_scroll - self.scroll_offset) / max_scroll if max_scroll > 0 else 0
+            thumb_y = sb_y + int((sb_track_h - thumb_h) * thumb_pos_ratio)
+            pygame.draw.rect(self.surface, (140, 175, 215), (sb_x, thumb_y, sb_w, thumb_h), border_radius=2)
 
         return self.surface

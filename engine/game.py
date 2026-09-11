@@ -21,6 +21,7 @@ from network.cable import Cable, CableType
 from modes.tutorial_mode import TutorialMode
 from modes.challenge_mode import ChallengeMode
 from modes.sandbox_mode import SandboxMode
+from engine.menu_scene import Menu3DScene, Menu3DCamera
 
 class GameManager:
     def __init__(self):
@@ -31,6 +32,8 @@ class GameManager:
         self.sound = SoundManager.get_instance()
         self.hud = HUD()
         self.menu = MenuManager()
+        self.menu_scene = Menu3DScene()
+        self.menu_camera = Menu3DCamera()
 
         # Initialize OpenGL context
         self.renderer3d.init_gl(self.window.width, self.window.height)
@@ -88,6 +91,9 @@ class GameManager:
                 w, h = self.window.handle_resize(event.w, event.h)
                 self.renderer3d.init_gl(w, h)
                 self.renderer2d.resize(w, h)
+                if self.terminal and self.terminal.is_open:
+                    self.terminal.x = max(10, min(w - 120, getattr(self.terminal, "x", 20)))
+                    self.terminal.y = max(10, min(h - 40, getattr(self.terminal, "y", 20)))
 
             # Global Fullscreen Toggle
             if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
@@ -159,9 +165,18 @@ class GameManager:
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE and not getattr(self.terminal, "active_job", None):
                     self.terminal.close()
                     self.window.capture_mouse(True)
-                else:
-                    if event.type == pygame.KEYDOWN:
-                        self.terminal.handle_key(event)
+                elif event.type == pygame.KEYDOWN:
+                    self.terminal.handle_key(event)
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    self.terminal.handle_mouse_down(event.pos, event.button)
+                    if not self.terminal.is_open:
+                        self.window.capture_mouse(True)
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    self.terminal.handle_mouse_up(event.pos, event.button)
+                elif event.type == pygame.MOUSEMOTION:
+                    self.terminal.handle_mouse_motion(event.pos, self.window.width, self.window.height)
+                elif event.type == pygame.MOUSEWHEEL:
+                    self.terminal.handle_mouse_wheel(event.y)
                 continue
 
             # 4. 3D In-Game Input Routing
@@ -190,12 +205,16 @@ class GameManager:
                             self.laptop_gui.open()
                             self.window.capture_mouse(False)
                         else:
-                            self.terminal = TerminalUI(target_dev, self.window.width - 160, self.window.height - 140)
-                            self.terminal.on_command_executed_callback = self._on_terminal_command
+                            self.terminal = self._create_terminal(target_dev)
                             self.terminal.open()
                             self.window.capture_mouse(False)
                         if hasattr(self.mode, "has_opened_terminal"):
                             self.mode.has_opened_terminal = True
+
+                # Toggle Mission Objective Card [O]
+                elif event.key == pygame.K_o:
+                    self.hud.show_objective = not getattr(self.hud, "show_objective", True)
+                    self.sound.play_key()
 
                 # Cable Connect / Disconnect Action [F]
                 elif event.key == pygame.K_f:
@@ -275,6 +294,20 @@ class GameManager:
                 # Cancel if clicking same port
                 self.held_cable_port = None
 
+    def _create_terminal(self, target_dev):
+        """Creates a TerminalUI sized and centered on the screen."""
+        w = self.window.width
+        h = self.window.height
+
+        term_w = min(880, w - 80)
+        term_h = min(600, h - 80)
+        tx = (w - term_w) // 2
+        ty = max(20, (h - term_h) // 2)
+
+        terminal = TerminalUI(target_dev, term_w, term_h, x=tx, y=ty)
+        terminal.on_command_executed_callback = self._on_terminal_command
+        return terminal
+
     def _on_terminal_command(self, device, cmd_line, output):
         if self.mode:
             self.mode.on_command_executed(device, cmd_line, output)
@@ -296,7 +329,10 @@ class GameManager:
     def _render(self):
         # Raycast once per frame if in active gameplay/inspect mode
         f_dev, f_port = None, None
-        if self.mode and self.menu.state in (MenuState.IN_GAME, MenuState.PAUSE, MenuState.TOPOLOGY_MAP, MenuState.DEVICE_MANAGER):
+        if self.menu.state == MenuState.MAIN_MENU:
+            # Render live 3D Datacenter scene with 2 fully loaded racks & cabling
+            self.renderer3d.render_scene(self.menu_camera, self.menu_scene.devices, self.menu_scene.cables)
+        elif self.mode and self.menu.state in (MenuState.IN_GAME, MenuState.PAUSE, MenuState.TOPOLOGY_MAP, MenuState.DEVICE_MANAGER):
             f_dev, f_port, _ = self.camera.raycast(self.mode.devices)
             self.renderer3d.render_scene(self.camera, self.mode.devices, self.mode.cables, f_dev, f_port)
         else:
@@ -327,8 +363,8 @@ class GameManager:
             # Draw CLI Terminal window overlay if open
             elif self.terminal and self.terminal.is_open:
                 term_surf = self.terminal.render()
-                tx = (w - self.terminal.width) // 2
-                ty = (h - self.terminal.height) // 2
+                tx = getattr(self.terminal, "x", (w - self.terminal.width) // 2)
+                ty = getattr(self.terminal, "y", (h - self.terminal.height) // 2)
                 surf.blit(term_surf, (tx, ty))
 
         # Draw Menu / Dialogs

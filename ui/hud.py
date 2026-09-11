@@ -40,6 +40,7 @@ class HUD:
         self.crosshair_size = 10
         self.crosshair_gap = 5
         self.reticle_anim = 0.0
+        self.show_objective = True
 
     def draw(self, surface, screen_w, screen_h, focused_dev, focused_port, held_cable_port,
              current_mode_title, current_objective, objective_checklist, hint_text=None,
@@ -51,10 +52,7 @@ class HUD:
         # 1. Precision Targeting Reticle / Crosshair
         self._draw_crosshair(surface, cx, cy, focused_dev, focused_port, held_cable_port, now)
 
-        # 2. NOC Real-Time Telemetry / Bandwidth Monitor Widget (Top Center)
-        self._draw_noc_telemetry(surface, screen_w, now)
-
-        # 3. Floating Context Action Prompt (Under crosshair)
+        # 2. Floating Context Action Prompt (Under crosshair)
         if held_cable_port:
             txt = f"CABLE HELD: {held_cable_port.device.hostname} [{held_cable_port.name}] -> Aim at peer port + [F] to Connect (or [X] to Cancel)"
             self._draw_badge(surface, cx, cy + 38, txt, bg_color=(235, 246, 255), border_color=(0, 115, 230), text_color=(0, 70, 160))
@@ -77,8 +75,9 @@ class HUD:
             self._draw_inspector(surface, screen_w - 360, screen_h - 225, 340, 190, focused_dev, now)
 
         # 5. Mission Objective / Quest Checklist Card with Progress Bar (Top-Left)
-        if current_objective or objective_checklist:
-            self._draw_objective_card(surface, 20, 20, 500, current_mode_title, current_objective, objective_checklist, hint_text)
+        if getattr(self, "show_objective", True) and (current_objective or objective_checklist):
+            obj_w = min(460, max(380, screen_w // 3))
+            self._draw_objective_card(surface, 20, 20, obj_w, current_mode_title, current_objective, objective_checklist, hint_text)
 
         # 6. Concept / Theory Panel (Top-Right, only in Tutorial mode)
         if concept_data:
@@ -114,25 +113,31 @@ class HUD:
             color = (0, 105, 195)
             bracket_color = (90, 140, 195)
             b_size = 12
-            b_gap = 6
+            b_gap = 7
 
-        # Center Precision Dot
-        pygame.draw.circle(surface, color, (cx, cy), 2)
+        # Center Precision Dot (symmetric 3x3 diamond centered exactly on cx, cy)
+        pygame.draw.rect(surface, color, (cx - 1, cy, 3, 1))
+        pygame.draw.rect(surface, color, (cx, cy - 1, 1, 3))
 
-        # 4 Corner Angle Brackets
-        gl = 5  # bracket arm length
-        # Top-Left Bracket
-        pygame.draw.line(surface, bracket_color, (cx - b_gap, cy - b_gap), (cx - b_gap + gl, cy - b_gap), 2)
-        pygame.draw.line(surface, bracket_color, (cx - b_gap, cy - b_gap), (cx - b_gap, cy - b_gap + gl), 2)
-        # Top-Right Bracket
-        pygame.draw.line(surface, bracket_color, (cx + b_gap, cy - b_gap), (cx + b_gap - gl, cy - b_gap), 2)
-        pygame.draw.line(surface, bracket_color, (cx + b_gap, cy - b_gap), (cx + b_gap, cy - b_gap + gl), 2)
-        # Bottom-Left Bracket
-        pygame.draw.line(surface, bracket_color, (cx - b_gap, cy + b_gap), (cx - b_gap + gl, cy + b_gap), 2)
-        pygame.draw.line(surface, bracket_color, (cx - b_gap, cy + b_gap), (cx - b_gap, cy + b_gap - gl), 2)
-        # Bottom-Right Bracket
-        pygame.draw.line(surface, bracket_color, (cx + b_gap, cy + b_gap), (cx + b_gap - gl, cy + b_gap), 2)
-        pygame.draw.line(surface, bracket_color, (cx + b_gap, cy + b_gap), (cx + b_gap, cy + b_gap - gl), 2)
+        # 4 Corner Angle Brackets (Mathematically symmetrical layout around cx, cy)
+        gl = 5   # bracket arm length
+        R = b_gap  # distance from center to inner corner
+
+        # Top-Left: corner at (-R, -R), arms go right and down
+        pygame.draw.rect(surface, bracket_color, (cx - R - 1, cy - R - 1, gl + 1, 2))
+        pygame.draw.rect(surface, bracket_color, (cx - R - 1, cy - R - 1, 2, gl + 1))
+
+        # Top-Right: corner at (+R, -R), arms go left and down
+        pygame.draw.rect(surface, bracket_color, (cx + R - gl + 1, cy - R - 1, gl + 1, 2))
+        pygame.draw.rect(surface, bracket_color, (cx + R, cy - R - 1, 2, gl + 1))
+
+        # Bottom-Left: corner at (-R, +R), arms go right and up
+        pygame.draw.rect(surface, bracket_color, (cx - R - 1, cy + R, gl + 1, 2))
+        pygame.draw.rect(surface, bracket_color, (cx - R - 1, cy + R - gl + 1, 2, gl + 1))
+
+        # Bottom-Right: corner at (+R, +R), arms go left and up
+        pygame.draw.rect(surface, bracket_color, (cx + R - gl + 1, cy + R, gl + 1, 2))
+        pygame.draw.rect(surface, bracket_color, (cx + R, cy + R - gl + 1, 2, gl + 1))
 
         # Floating Port Tooltip Tag right above the crosshair when hovering a port
         if focused_port:
@@ -325,7 +330,13 @@ class HUD:
 
         # Header
         pygame.draw.rect(surface, (235, 244, 255), (x, y, w, 32), border_top_left_radius=8, border_top_right_radius=8)
-        header_surf = self.font_bold.render(f"MISSION: {mode_title.upper()}", True, (0, 80, 175))
+        header_txt = f"MISSION: {mode_title.upper()}"
+        header_surf = self.font_bold.render(header_txt, True, (0, 80, 175))
+        if header_surf.get_width() > w - 24:
+            trimmed = header_txt
+            while trimmed and self.font_bold.render(trimmed + "...", True, (0, 80, 175)).get_width() > w - 24:
+                trimmed = trimmed[:-1]
+            header_surf = self.font_bold.render(trimmed + "...", True, (0, 80, 175))
         surface.blit(header_surf, (x + 12, y + 7))
 
         curr_y = y + 40
@@ -413,6 +424,6 @@ class HUD:
         if is_sandbox:
             controls = "[WASD] Move   [C] Crouch   [E] CLI   [F] Cable   [N] Rack Manager (Add/Remove)   [Del] Quick Delete   [M] 2D Map   [K] Save   [L] Load   [P] Pause"
         else:
-            controls = "[WASD] Move   [C] Crouch   [Mouse] Look   [E] Terminal   [F] Cable Action   [M] 2D Topology   [P] Pause Menu   [F11] Fullscreen"
+            controls = "[WASD] Move   [C] Crouch   [Mouse] Look   [E] Terminal   [F] Cable Action   [O] Mission   [M] 2D Topology   [P] Pause Menu   [F11] Fullscreen"
         ctrl_surf = self.font_main.render(controls, True, (50, 75, 105))
         surface.blit(ctrl_surf, (20, screen_h - bar_h + 6))

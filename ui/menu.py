@@ -28,6 +28,10 @@ class MenuManager:
         self.font_body = pygame.font.SysFont("Segoe UI", 14) or pygame.font.Font(None, 18)
         self.font_small = pygame.font.SysFont("Segoe UI", 12) or pygame.font.Font(None, 15)
         self.font_mono = pygame.font.SysFont("Consolas", 13) or pygame.font.Font(None, 16)
+        self.font_rack_badge = pygame.font.SysFont("Segoe UI", 12, bold=True) or pygame.font.Font(None, 14)
+        self.font_rack_sub = pygame.font.SysFont("Segoe UI", 10, bold=True) or pygame.font.Font(None, 12)
+        self.font_rack_micro = pygame.font.SysFont("Consolas", 9, bold=True) or pygame.font.Font(None, 11)
+        self.font_rack_nano = pygame.font.SysFont("Consolas", 8) or pygame.font.Font(None, 10)
 
         self.selected_button = 0
         self.menu_options = [
@@ -50,11 +54,11 @@ class MenuManager:
         self.dm_feedback_color = (15, 140, 65)
 
     def get_main_menu_button_rect(self, idx, w, h):
-        cx = w // 2
-        btn_w, btn_h = 460, 56
-        start_y = 200
+        bx = 48
+        btn_w = min(400, max(350, int(w * 0.30)))
+        btn_h = 56
+        start_y = 195
         by = start_y + idx * (btn_h + 14)
-        bx = cx - btn_w // 2
         return pygame.Rect(bx, by, btn_w, btn_h)
 
     def get_pause_button_rect(self, idx, w, h):
@@ -407,25 +411,79 @@ class MenuManager:
         elif self.state == MenuState.DEVICE_MANAGER:
             self._render_device_manager(surface, screen_w, screen_h, mode)
 
-    def _render_main_menu(self, surface, w, h):
-        # Modern Enterprise Clean Light Background
-        surface.fill((244, 247, 252))
+    def _draw_menu_bezier_cable(self, surface, p0, p1, p2, p3, color, width=2):
+        """Draws smooth anti-aliased cubic Bezier cable with depth shadow and connector boots."""
+        steps = 22
+        pts = []
+        for i in range(steps + 1):
+            t = i / steps
+            u = 1.0 - t
+            x = (u**3)*p0[0] + 3*(u**2)*t*p1[0] + 3*u*(t**2)*p2[0] + (t**3)*p3[0]
+            y = (u**3)*p0[1] + 3*(u**2)*t*p1[1] + 3*u*(t**2)*p2[1] + (t**3)*p3[1]
+            pts.append((int(x), int(y)))
 
-        # Subtle Clean Blueprint Grid
-        grid_color = (226, 233, 244)
-        for x in range(0, w, 40):
-            pygame.draw.line(surface, grid_color, (x, 0), (x, h), 1)
+        shadow = (max(0, color[0] // 4), max(0, color[1] // 4), max(0, color[2] // 4))
+        pygame.draw.lines(surface, shadow, False, pts, width + 2)
+        pygame.draw.lines(surface, color, False, pts, width)
+        pygame.draw.rect(surface, (38, 44, 56), (pts[0][0]-2, pts[0][1]-2, 5, 5), border_radius=1)
+        pygame.draw.rect(surface, (38, 44, 56), (pts[-1][0]-2, pts[-1][1]-2, 5, 5), border_radius=1)
+
+    def _render_main_menu(self, surface, w, h):
+        now = pygame.time.get_ticks() / 1000.0
+
+        # Start with transparent surface so the real 3D OpenGL datacenter scene shines through
+        surface.fill((0, 0, 0, 0))
+
+        # =========================================================================
+        # LEFT PANE: TRANSLUCENT FROSTED GLASS OVERLAY CARD
+        # =========================================================================
+        left_w = min(470, max(420, int(w * 0.36)))
+
+        glass_card = pygame.Surface((left_w, h), pygame.SRCALPHA)
+        glass_card.fill((246, 249, 254, 235))
+
+        # Subtle blueprint grid on the glass card
+        grid_color = (230, 238, 248)
+        for x in range(0, left_w, 40):
+            pygame.draw.line(glass_card, grid_color, (x, 0), (x, h), 1)
         for y in range(0, h, 40):
-            pygame.draw.line(surface, grid_color, (0, y), (w, y), 1)
+            pygame.draw.line(glass_card, grid_color, (0, y), (left_w, y), 1)
+
+        # Right border edge with subtle divider line
+        pygame.draw.line(glass_card, (205, 218, 235), (left_w - 1, 0), (left_w - 1, h), 1)
+        surface.blit(glass_card, (0, 0))
+
+        # Soft floating shadow to the right of the glass pane
+        for s_i in range(6):
+            s_alpha = int(18 * (1.0 - s_i / 6.0))
+            shadow_strip = pygame.Surface((1, h), pygame.SRCALPHA)
+            shadow_strip.fill((10, 20, 35, s_alpha))
+            surface.blit(shadow_strip, (left_w + s_i, 0))
+
+        left_x = 48
+
+        # Datacenter Live Status Badge
+        badge_w, badge_h = 245, 24
+        pygame.draw.rect(surface, (232, 242, 255), (left_x, 48, badge_w, badge_h), border_radius=12)
+        pygame.draw.rect(surface, (180, 210, 245), (left_x, 48, badge_w, badge_h), width=1, border_radius=12)
+        live_dot_color = (30, 210, 95) if (int(now * 2.0) % 2 == 0) else (15, 140, 60)
+        pygame.draw.circle(surface, live_dot_color, (left_x + 14, 60), 4)
+        tag_text = self.font_rack_micro.render("NETENGINEER // 3D DATACENTER ENGINE", True, (0, 85, 185))
+        surface.blit(tag_text, (left_x + 24, 53))
 
         # Title Card
-        cx = w // 2
-        logo_surf = self.font_logo.render("NETENGINEER 3D", True, (16, 42, 82))
-        sub_surf = self.font_sub.render("Enterprise Datacenter & Cisco IOS Network Simulator", True, (0, 102, 204))
-        surface.blit(logo_surf, (cx - logo_surf.get_width() // 2, 75))
-        surface.blit(sub_surf, (cx - sub_surf.get_width() // 2, 130))
+        logo_surf = self.font_logo.render("NETENGINEER 3D", True, (14, 38, 75))
+        sub_surf = self.font_sub.render("Enterprise Datacenter & Cisco IOS Simulator", True, (0, 102, 204))
+        surface.blit(logo_surf, (left_x, 75))
+        surface.blit(sub_surf, (left_x, 126))
 
-        # Menu Buttons
+        specs_text = self.font_small.render("Layer 2/3 Switching  *  STP 802.1D  *  OSPF/NAT  *  Cisco CLI", True, (95, 115, 140))
+        surface.blit(specs_text, (left_x, 154))
+
+        btn_w = self.get_main_menu_button_rect(0, w, h).width
+        pygame.draw.line(surface, (215, 226, 240), (left_x, 178), (left_x + btn_w, 178), 1)
+
+        # Menu Buttons (Left-Aligned)
         for i, (title, desc) in enumerate(self.menu_options):
             btn_rect = self.get_main_menu_button_rect(i, w, h)
             is_hover = (i == self.selected_button)
@@ -435,10 +493,14 @@ class MenuManager:
 
             # Drop shadow
             shadow_rect = pygame.Rect(btn_rect.x + 2, btn_rect.y + 3, btn_rect.w, btn_rect.h)
-            pygame.draw.rect(surface, (215, 225, 238), shadow_rect, border_radius=8)
+            pygame.draw.rect(surface, (210, 222, 238), shadow_rect, border_radius=8)
 
             pygame.draw.rect(surface, bg_col, btn_rect, border_radius=8)
             pygame.draw.rect(surface, border_col, btn_rect, width=2 if is_hover else 1, border_radius=8)
+
+            # Active indicator bar on left edge
+            if is_hover:
+                pygame.draw.rect(surface, (0, 115, 230), (btn_rect.x, btn_rect.y, 5, btn_rect.h), border_top_left_radius=8, border_bottom_left_radius=8)
 
             t_color = (0, 85, 200) if is_hover else (24, 36, 54)
             d_color = (0, 105, 215) if is_hover else (90, 105, 125)
@@ -446,12 +508,753 @@ class MenuManager:
             t_surf = self.font_btn.render(f"[{i+1}] {title}", True, t_color)
             d_surf = self.font_body.render(desc, True, d_color)
 
-            surface.blit(t_surf, (btn_rect.x + 20, btn_rect.y + 8))
-            surface.blit(d_surf, (btn_rect.x + 20, btn_rect.y + 32))
+            surface.blit(t_surf, (btn_rect.x + (22 if is_hover else 18), btn_rect.y + 8))
+            surface.blit(d_surf, (btn_rect.x + (22 if is_hover else 18), btn_rect.y + 32))
 
-        # Footer
-        footer = self.font_body.render("Click buttons with MOUSE, or press [1]-[5] / [Up/Down] + [ENTER]", True, (90, 115, 145))
-        surface.blit(footer, (cx - footer.get_width() // 2, h - 45))
+        # Bottom System Info Card (Left)
+        info_y = min(h - 135, self.get_main_menu_button_rect(4, w, h).bottom + 22)
+        if info_y + 80 < h:
+            info_rect = pygame.Rect(left_x, info_y, btn_w, 75)
+            pygame.draw.rect(surface, (255, 255, 255), info_rect, border_radius=8)
+            pygame.draw.rect(surface, (215, 228, 245), info_rect, width=1, border_radius=8)
+
+            s1 = self.font_rack_micro.render("LIVE 3D ENGINE: 42U DUAL RACKS * CATENARY PHYSICS", True, (15, 135, 65))
+            s2 = self.font_small.render("Controls: [1]-[5] / [W][S] / Mouse Click  |  [F11] Fullscreen", True, (75, 95, 120))
+            s3 = self.font_small.render("Hardware: Real-Time 3D Cables & Blinking Status LEDs", True, (95, 110, 135))
+            surface.blit(s1, (info_rect.x + 14, info_rect.y + 10))
+            surface.blit(s2, (info_rect.x + 14, info_rect.y + 30))
+            surface.blit(s3, (info_rect.x + 14, info_rect.y + 50))
+
+        # Bottom hint
+        footer = self.font_small.render("Click buttons with MOUSE, or press [1]-[5] / [Up/Down] + [ENTER]", True, (110, 125, 145))
+        surface.blit(footer, (left_x, h - 30))
+
+    def _render_main_menu_racks(self, surface, w, h, now):
+        """Renders 2 detailed enterprise server racks side-by-side with full devices, cabling and animated LEDs."""
+        btn_r0 = self.get_main_menu_button_rect(0, w, h)
+        left_start = btn_r0.right + 45
+        right_end = w - 45
+        avail_w = max(400, right_end - left_start)
+
+        gap = min(50, max(30, int(avail_w * 0.07)))
+        rw = min(320, max(260, (avail_w - gap) // 2))
+        total_w = rw * 2 + gap
+        r1_x = left_start + max(0, (avail_w - total_w) // 2)
+        r2_x = r1_x + rw + gap
+
+        top_y = 52
+        bottom_y = h - 42
+        rack_h = bottom_y - top_y
+
+        # -------------------------------------------------------------------------
+        # 1. TOP OVERHEAD CABLE TRAY / LADDER RACK (BRIDGING BOTH RACKS)
+        # -------------------------------------------------------------------------
+        tray_x1 = r1_x - 14
+        tray_x2 = r2_x + rw + 14
+        tray_y = 22
+        tray_h = 24
+
+        # Steel Ladder Tray Rails
+        pygame.draw.rect(surface, (238, 242, 248), (tray_x1, tray_y, tray_x2 - tray_x1, tray_h), border_radius=4)
+        pygame.draw.rect(surface, (160, 175, 195), (tray_x1, tray_y, tray_x2 - tray_x1, tray_h), width=1, border_radius=4)
+        pygame.draw.line(surface, (140, 155, 175), (tray_x1, tray_y + 4), (tray_x2, tray_y + 4), 2)
+        pygame.draw.line(surface, (140, 155, 175), (tray_x1, tray_y + tray_h - 4), (tray_x2, tray_y + tray_h - 4), 2)
+
+        # Ladder rungs
+        for rung_x in range(tray_x1 + 15, tray_x2 - 10, 18):
+            pygame.draw.line(surface, (170, 185, 205), (rung_x, tray_y + 4), (rung_x, tray_y + tray_h - 4), 2)
+
+        # Yellow Fiber Optic Duct in center
+        duct_y = tray_y + 7
+        duct_h = 10
+        pygame.draw.rect(surface, (245, 185, 20), (tray_x1 + 8, duct_y, tray_x2 - tray_x1 - 16, duct_h), border_radius=3)
+        pygame.draw.rect(surface, (205, 145, 10), (tray_x1 + 8, duct_y, tray_x2 - tray_x1 - 16, duct_h), width=1, border_radius=3)
+
+        duct_lbl = self.font_rack_nano.render("100G FIBER BACKBONE DUCT // OM4 / OS2", True, (60, 45, 5))
+        surface.blit(duct_lbl, (r1_x + (total_w - duct_lbl.get_width()) // 2, duct_y - 1))
+
+        # -------------------------------------------------------------------------
+        # 2. RACK ENCLOSURES & VERTICAL 19" RAILS
+        # -------------------------------------------------------------------------
+        racks_meta = [
+            (r1_x, "RACK-A01", "CORE / SPINE", 21.4, 0.86),
+            (r2_x, "RACK-A02", "DIST / LEAF", 22.8, 1.14)
+        ]
+
+        for rx, r_label, r_sub, temp_c, kw in racks_meta:
+            # Drop shadow
+            pygame.draw.rect(surface, (216, 226, 238), (rx + 4, top_y + 4, rw, rack_h), border_radius=8)
+            # Outer dark steel chassis
+            pygame.draw.rect(surface, (20, 24, 32), (rx, top_y, rw, rack_h), border_radius=8)
+            pygame.draw.rect(surface, (55, 65, 80), (rx, top_y, rw, rack_h), width=2, border_radius=8)
+
+            # Header Banner (OLED & Status)
+            header_h = 38
+            pygame.draw.rect(surface, (28, 34, 46), (rx, top_y, rw, header_h), border_top_left_radius=8, border_top_right_radius=8)
+            pygame.draw.line(surface, (60, 72, 92), (rx, top_y + header_h), (rx + rw, top_y + header_h), 1)
+
+            # Top Breathing Beacon Bar
+            pulse = 0.75 + 0.25 * math.sin(now * 2.5 + (0.0 if rx == r1_x else 1.6))
+            beacon_col = (int(0 * pulse), int(210 * pulse), int(255 * pulse))
+            pygame.draw.line(surface, beacon_col, (rx + 12, top_y + 4), (rx + rw - 12, top_y + 4), 2)
+
+            # Rack Name & Role
+            t_badge = self.font_rack_badge.render(r_label, True, (255, 255, 255))
+            t_role = self.font_rack_micro.render(r_sub, True, (0, 215, 255))
+            surface.blit(t_badge, (rx + 12, top_y + 8))
+            surface.blit(t_role, (rx + 12 + t_badge.get_width() + 8, top_y + 10))
+
+            # OLED Digital Readout
+            oled_text = f"{temp_c:.1f}C * {kw:.2f}kW * OK"
+            t_oled = self.font_rack_nano.render(oled_text, True, (35, 235, 120))
+            surface.blit(t_oled, (rx + rw - t_oled.get_width() - 14, top_y + 11))
+
+            # Inner Equipment Bay
+            inner_x = rx + 14
+            inner_w = rw - 28
+            bay_top = top_y + header_h + 2
+            bay_bot = bottom_y - 28
+            bay_h = bay_bot - bay_top
+
+            pygame.draw.rect(surface, (14, 17, 24), (inner_x, bay_top, inner_w, bay_h))
+
+            # Vertical 19" Mounting Rails (Left & Right) with cage nut holes & U ticks
+            rail_w = 8
+            for rail_x in (inner_x - rail_w + 2, inner_x + inner_w - 2):
+                pygame.draw.rect(surface, (36, 42, 54), (rail_x, bay_top, rail_w, bay_h))
+                for tick_y in range(bay_top + 6, bay_bot - 6, 10):
+                    pygame.draw.rect(surface, (16, 20, 28), (rail_x + 2, tick_y, 4, 3))
+
+            # Base & Casters
+            base_y = bottom_y - 26
+            pygame.draw.rect(surface, (25, 30, 40), (rx, base_y, rw, 26), border_bottom_left_radius=8, border_bottom_right_radius=8)
+            pygame.draw.line(surface, (50, 60, 75), (rx, base_y), (rx + rw, base_y), 1)
+
+            # Casters
+            for cx in (rx + 22, rx + rw - 36):
+                pygame.draw.rect(surface, (80, 90, 105), (cx, base_y + 8, 14, 12), border_radius=2)
+                pygame.draw.rect(surface, (45, 52, 62), (cx + 2, base_y + 14, 10, 8), border_radius=1)
+
+            # Grounding wire
+            pygame.draw.line(surface, (50, 180, 60), (rx + 10, base_y + 16), (rx + 10, base_y + 24), 2)
+            pygame.draw.circle(surface, (215, 170, 40), (rx + 10, base_y + 16), 3)
+
+        # -------------------------------------------------------------------------
+        # 3. FULL DEVICE HARDWARE IN BOTH RACKS
+        # -------------------------------------------------------------------------
+        bay_top = top_y + 40
+        ix1 = r1_x + 14
+        iw = rw - 28
+        ix2 = r2_x + 14
+
+        # Slot layout definitions: (slot_idx, rel_y, h, name)
+        # Total height budget approx ~ 520px
+        slots = [
+            (1,  0,   20, "brush"),      # Cable Brush Panel
+            (2,  22,  48, "router"),     # Cisco ASR 1002-HX Router (2U)
+            (3,  72,  32, "patch_a"),    # 24-Port Cat6 Patch Panel 1A
+            (4,  106, 36, "switch_core1"),# Catalyst 9300-48P Core Switch #1
+            (5,  144, 36, "switch_core2"),# Catalyst 9300-48P Core Switch #2
+            (6,  182, 24, "wire_mgr"),   # 1U D-Ring Horizontal Wire Manager
+            (7,  208, 34, "firewall"),   # Next-Gen Enterprise Firewall
+            (8,  244, 28, "fiber_liu"),  # Fiber Optic LIU / ODF Tray
+            (9,  274, 56, "server_san"),  # Dell PowerEdge Storage SAN (2U)
+            (10, 332, 56, "server_host"), # Dell PowerEdge Compute Node (2U)
+            (11, 390, 28, "sensor"),     # NetBotz Environmental Hub
+            (12, 420, 56, "ups"),        # APC Smart-UPS 3000VA (2U)
+        ]
+
+        # Port coordinates map for drawing patch cables
+        p_coords = {}
+
+        # ------------------ RACK 1 DEVICES ------------------
+        for sid, sy, sh, stype in slots:
+            dy = bay_top + sy
+            dev_rect = pygame.Rect(ix1, dy, iw, sh)
+
+            if stype == "brush":
+                pygame.draw.rect(surface, (26, 30, 38), dev_rect)
+                # Nylon brush bristles
+                pygame.draw.rect(surface, (12, 15, 20), (ix1 + 10, dy + 5, iw - 20, sh - 10))
+                for bx in range(ix1 + 14, ix1 + iw - 14, 4):
+                    pygame.draw.line(surface, (40, 48, 60), (bx, dy + 6), (bx, dy + sh - 6), 1)
+
+            elif stype == "router":
+                # Cisco ASR 1002-HX Titanium Faceplate
+                pygame.draw.rect(surface, (34, 44, 60), dev_rect)
+                pygame.draw.rect(surface, (55, 70, 95), dev_rect, width=1)
+                # Cisco badge
+                pygame.draw.rect(surface, (0, 115, 200), (ix1 + 8, dy + 8, 4, sh - 16))
+                lbl = self.font_rack_micro.render("CISCO ASR 1002-HX", True, (230, 240, 255))
+                surface.blit(lbl, (ix1 + 16, dy + 6))
+                # Router status LEDs: PWR1, PWR2, STAT, ACT
+                pwr1_col = (25, 230, 80)
+                pwr2_col = (25, 230, 80)
+                act_col = (255, 200, 30) if ((int(now * 4.0) % 3) != 0) else (30, 220, 80)
+                pygame.draw.circle(surface, pwr1_col, (ix1 + 18, dy + 24), 2)
+                pygame.draw.circle(surface, pwr2_col, (ix1 + 26, dy + 24), 2)
+                pygame.draw.circle(surface, act_col, (ix1 + 34, dy + 24), 2)
+                led_txt = self.font_rack_nano.render("PWR STAT ACT", True, (130, 155, 185))
+                surface.blit(led_txt, (ix1 + 42, dy + 20))
+
+                # Console / Aux ports
+                pygame.draw.rect(surface, (0, 140, 220), (ix1 + 115, dy + 18, 10, 10), border_radius=2)
+                p_coords["r1_router_con"] = (ix1 + 120, dy + 23)
+
+                # 4x 10G SFP+ Ports on right
+                for p_idx in range(4):
+                    px = ix1 + iw - 65 + p_idx * 14
+                    py = dy + 16
+                    pygame.draw.rect(surface, (185, 195, 210), (px, py, 11, 14), border_radius=2)
+                    pygame.draw.rect(surface, (70, 80, 95), (px + 2, py + 3, 7, 8))
+                    # Optic LED
+                    sfp_led = (25, 235, 90) if (math.sin(now * 15.0 + p_idx * 3.1) > -0.2) else (15, 90, 30)
+                    pygame.draw.rect(surface, sfp_led, (px + 3, py - 3, 5, 2))
+                    p_coords[f"r1_router_sfp_{p_idx}"] = (px + 5, py + 7)
+
+            elif stype == "patch_a":
+                # 24-Port Cat6 Patch Panel
+                pygame.draw.rect(surface, (22, 26, 34), dev_rect)
+                pygame.draw.rect(surface, (45, 52, 65), dev_rect, width=1)
+                p_lbl = self.font_rack_nano.render("CAT6 PATCH 1A // 1-24", True, (160, 180, 205))
+                surface.blit(p_lbl, (ix1 + 8, dy + 2))
+                # 24 RJ45 Ports in 4 groups of 6
+                port_idx = 0
+                for grp in range(4):
+                    gx = ix1 + 10 + grp * (iw - 20) // 4
+                    for pi in range(6):
+                        px = gx + pi * ((iw - 20) // 25)
+                        py = dy + 14
+                        pygame.draw.rect(surface, (14, 18, 24), (px, py, 8, 10), border_radius=1)
+                        pygame.draw.rect(surface, (160, 140, 40), (px + 2, py + 2, 4, 3))
+                        p_coords[f"r1_patch_{port_idx}"] = (px + 4, py + 5)
+                        port_idx += 1
+
+            elif stype in ("switch_core1", "switch_core2"):
+                # Cisco Catalyst 9300-48P Switches
+                pygame.draw.rect(surface, (30, 38, 52), dev_rect)
+                pygame.draw.rect(surface, (0, 115, 220), (ix1, dy, 4, sh))
+                pygame.draw.rect(surface, (50, 65, 88), dev_rect, width=1)
+
+                sw_name = "CATALYST 9300-48P #1" if stype == "switch_core1" else "CATALYST 9300-48P #2 (STACK)"
+                lbl = self.font_rack_nano.render(sw_name, True, (220, 235, 255))
+                surface.blit(lbl, (ix1 + 8, dy + 2))
+
+                # Mode LED
+                pygame.draw.circle(surface, (0, 210, 255), (ix1 + iw - 68, dy + 6), 2)
+
+                # Two rows of 24 RJ45 Ports + Blinking Activity LEDs
+                sw_id = 1 if stype == "switch_core1" else 2
+                for c in range(20):
+                    px = ix1 + 8 + c * ((iw - 85) // 20)
+                    for r in (0, 1):
+                        py = dy + 12 + r * 10
+                        pygame.draw.rect(surface, (15, 20, 28), (px, py, 7, 8), border_radius=1)
+                        # Traffic activity animation
+                        traffic = math.sin(now * (14.0 + (c % 5) * 2.7) + (c + r * 10 + sw_id * 7)) * \
+                                  math.cos(now * (19.0 + (c % 3) * 3.3) + c * 1.9)
+                        is_lit = traffic > 0.12
+                        led_c = (25, 240, 85) if is_lit else (10, 80, 30)
+                        pygame.draw.rect(surface, led_c, (px + 1, py - 2 if r == 0 else py + 8, 4, 1))
+
+                        p_key = f"r1_sw{sw_id}_p_{c}_{r}"
+                        p_coords[p_key] = (px + 3, py + 4)
+
+                # 4x SFP+ Uplink cages on right
+                for u_idx in range(4):
+                    ux = ix1 + iw - 54 + u_idx * 13
+                    uy = dy + 12
+                    pygame.draw.rect(surface, (180, 190, 205), (ux, uy, 10, 18), border_radius=2)
+                    pygame.draw.rect(surface, (60, 70, 85), (ux + 2, uy + 4, 6, 10))
+                    # Optic LED
+                    sfp_active = math.sin(now * 18.0 + u_idx * 4.1 + sw_id) > -0.1
+                    sfp_col = (0, 235, 240) if sfp_active else (0, 80, 90)
+                    pygame.draw.circle(surface, sfp_col, (ux + 5, uy - 2), 2)
+                    p_coords[f"r1_sw{sw_id}_sfp_{u_idx}"] = (ux + 5, uy + 9)
+
+            elif stype == "wire_mgr":
+                # 1U D-Ring Horizontal Wire Manager
+                pygame.draw.rect(surface, (20, 24, 32), dev_rect)
+                for rx_i in range(5):
+                    dx_ring = ix1 + 25 + rx_i * ((iw - 50) // 4)
+                    pygame.draw.circle(surface, (160, 175, 195), (dx_ring, dy + sh // 2), 7, 2)
+                    # Bundled cables running through rings
+                    pygame.draw.line(surface, (0, 110, 220), (dx_ring - 12, dy + sh // 2 - 1), (dx_ring + 12, dy + sh // 2 - 1), 2)
+                    pygame.draw.line(surface, (20, 195, 100), (dx_ring - 12, dy + sh // 2 + 2), (dx_ring + 12, dy + sh // 2 + 2), 2)
+
+            elif stype == "firewall":
+                # Fortinet FortiGate 100F (White & Red styling)
+                pygame.draw.rect(surface, (244, 247, 252), dev_rect)
+                pygame.draw.rect(surface, (215, 35, 45), (ix1, dy, 5, sh))
+                pygame.draw.rect(surface, (210, 220, 235), dev_rect, width=1)
+                fw_lbl = self.font_rack_micro.render("FORTIGATE 100F", True, (180, 25, 35))
+                surface.blit(fw_lbl, (ix1 + 10, dy + 3))
+
+                # HA Status LED (pulsing active)
+                ha_col = (20, 230, 80) if (math.sin(now * 3.0) > -0.7) else (10, 120, 40)
+                pygame.draw.circle(surface, ha_col, (ix1 + 110, dy + 9), 3)
+                ha_txt = self.font_rack_nano.render("HA: MASTER", True, (50, 70, 90))
+                surface.blit(ha_txt, (ix1 + 118, dy + 5))
+
+                # 12x GE Ports
+                for f_p in range(12):
+                    fx = ix1 + 10 + f_p * ((iw - 75) // 12)
+                    fy = dy + 16
+                    pygame.draw.rect(surface, (28, 34, 45), (fx, fy, 8, 11), border_radius=1)
+                    p_coords[f"r1_fw_p_{f_p}"] = (fx + 4, fy + 5)
+
+                # HA-1 & HA-2 sync ports on right
+                p_coords["r1_fw_ha1"] = (ix1 + iw - 38, dy + 18)
+                p_coords["r1_fw_ha2"] = (ix1 + iw - 20, dy + 18)
+                pygame.draw.rect(surface, (200, 30, 40), (ix1 + iw - 42, dy + 14, 10, 13), border_radius=1)
+                pygame.draw.rect(surface, (200, 30, 40), (ix1 + iw - 24, dy + 14, 10, 13), border_radius=1)
+
+            elif stype == "fiber_liu":
+                # Optical Fiber LIU/ODF Tray
+                pygame.draw.rect(surface, (25, 30, 40), dev_rect)
+                p_lbl = self.font_rack_nano.render("FIBER ODF TRAY // LC DUPLEX OM4", True, (0, 205, 230))
+                surface.blit(p_lbl, (ix1 + 8, dy + 2))
+                for fib_idx in range(10):
+                    fx = ix1 + 14 + fib_idx * ((iw - 28) // 10)
+                    fy = dy + 14
+                    col = (0, 210, 230) if fib_idx < 6 else (0, 115, 230)
+                    pygame.draw.rect(surface, col, (fx, fy, 11, 9), border_radius=2)
+                    pygame.draw.circle(surface, (255, 255, 255), (fx + 3, fy + 4), 1)
+                    pygame.draw.circle(surface, (255, 255, 255), (fx + 8, fy + 4), 1)
+                    p_coords[f"r1_fiber_{fib_idx}"] = (fx + 5, fy + 4)
+
+            elif stype in ("server_san", "server_host"):
+                # Dell PowerEdge R750 Enterprise 2U Servers
+                pygame.draw.rect(surface, (34, 38, 46), dev_rect)
+                pygame.draw.rect(surface, (65, 75, 90), dev_rect, width=1)
+                # Hexagonal silver ventilation pattern on top strip
+                pygame.draw.rect(surface, (24, 28, 35), (ix1 + 4, dy + 4, iw - 8, 12))
+                srv_name = "DELL POWEREDGE R750 (SAN NODE)" if stype == "server_san" else "DELL POWEREDGE R750 (VM HOST)"
+                lbl = self.font_rack_nano.render(srv_name, True, (215, 225, 240))
+                surface.blit(lbl, (ix1 + 8, dy + 5))
+
+                # Power button with blue halo LED
+                pygame.draw.circle(surface, (0, 180, 255), (ix1 + iw - 16, dy + 10), 3)
+
+                # 8x Hot-Swap SAS/NVMe 2.5" Drive Caddies with Blinking Activity LEDs
+                d_w = (iw - 18) // 8
+                srv_id = 1 if stype == "server_san" else 2
+                for d_i in range(8):
+                    dx = ix1 + 6 + d_i * d_w
+                    dy_c = dy + 20
+                    pygame.draw.rect(surface, (20, 24, 32), (dx, dy_c, d_w - 3, 30), border_radius=2)
+                    pygame.draw.rect(surface, (48, 56, 68), (dx, dy_c, d_w - 3, 30), width=1, border_radius=2)
+                    # Blue release lever tab
+                    pygame.draw.rect(surface, (0, 120, 220), (dx + 2, dy_c + 22, d_w - 7, 5), border_radius=1)
+
+                    # Disk I/O activity flicker animation
+                    d_act = (math.sin(now * 22.0 + d_i * 4.3 + srv_id * 3.1) + \
+                             math.sin(now * 37.0 + d_i * 1.7)) > 0.35
+                    d_col = (255, 190, 30) if d_act else (55, 45, 12)
+                    pygame.draw.circle(surface, (25, 220, 80), (dx + 4, dy_c + 4), 2)      # Power
+                    pygame.draw.circle(surface, d_col, (dx + d_w - 7, dy_c + 4), 2)        # Activity
+
+                p_coords[f"r1_srv{srv_id}_nic1"] = (ix1 + iw - 45, dy + sh - 8)
+                p_coords[f"r1_srv{srv_id}_nic2"] = (ix1 + iw - 25, dy + sh - 8)
+
+            elif stype == "sensor":
+                # Environmental Hub NetBotz
+                pygame.draw.rect(surface, (24, 28, 36), dev_rect)
+                pygame.draw.rect(surface, (45, 55, 70), dev_rect, width=1)
+                lbl = self.font_rack_nano.render("NETBOTZ 250 // SENSORS", True, (150, 175, 205))
+                surface.blit(lbl, (ix1 + 8, dy + 3))
+                # Digital Green Sensor Readout
+                sens_text = f"TEMP: {temp_c:.1f}C  HUMIDITY: 42%  DEW: 9.4C"
+                s_surf = self.font_rack_nano.render(sens_text, True, (30, 240, 110))
+                surface.blit(s_surf, (ix1 + 8, dy + 15))
+
+            elif stype == "ups":
+                # APC Smart-UPS RT 3000VA
+                pygame.draw.rect(surface, (20, 24, 32), dev_rect)
+                pygame.draw.rect(surface, (50, 60, 75), dev_rect, width=1)
+                lbl = self.font_rack_micro.render("APC SMART-UPS 3000VA", True, (215, 228, 245))
+                surface.blit(lbl, (ix1 + 10, dy + 6))
+
+                # Blue Backlit LCD Screen
+                lcd_rect = pygame.Rect(ix1 + 10, dy + 22, 130, 26)
+                pygame.draw.rect(surface, (10, 55, 120), lcd_rect, border_radius=2)
+                pygame.draw.rect(surface, (0, 140, 255), lcd_rect, width=1, border_radius=2)
+                lcd_text = "230.4 V  ~  50Hz"
+                lcd_load = "LOAD: 48%  BATT: 100%"
+                surface.blit(self.font_rack_nano.render(lcd_text, True, (180, 225, 255)), (lcd_rect.x + 6, lcd_rect.y + 3))
+                surface.blit(self.font_rack_nano.render(lcd_load, True, (180, 225, 255)), (lcd_rect.x + 6, lcd_rect.y + 14))
+
+                # 5-Bar Green Battery Gauge
+                for b_i in range(5):
+                    bx = ix1 + 155 + b_i * 9
+                    pygame.draw.rect(surface, (25, 235, 90), (bx, dy + 26, 6, 16), border_radius=1)
+
+                # Master power switch
+                pygame.draw.rect(surface, (215, 40, 45), (ix1 + iw - 28, dy + 24, 18, 20), border_radius=2)
+
+        # ------------------ RACK 2 DEVICES ------------------
+        for sid, sy, sh, stype in slots:
+            dy = bay_top + sy
+            dev_rect = pygame.Rect(ix2, dy, iw, sh)
+
+            if stype == "brush":
+                pygame.draw.rect(surface, (26, 30, 38), dev_rect)
+                pygame.draw.rect(surface, (12, 15, 20), (ix2 + 10, dy + 5, iw - 20, sh - 10))
+                for bx in range(ix2 + 14, ix2 + iw - 14, 4):
+                    pygame.draw.line(surface, (40, 48, 60), (bx, dy + 6), (bx, dy + sh - 6), 1)
+
+            elif stype == "router":
+                # In Rack 2: Cisco Catalyst 3850-24T Distribution Switch
+                pygame.draw.rect(surface, (32, 40, 54), dev_rect)
+                pygame.draw.rect(surface, (55, 70, 95), dev_rect, width=1)
+                lbl = self.font_rack_micro.render("CATALYST 3850-24T (DIST)", True, (230, 242, 255))
+                surface.blit(lbl, (ix2 + 8, dy + 6))
+
+                # 24 Gigabit Ports + Traffic Blinking LEDs
+                for c in range(12):
+                    px = ix2 + 10 + c * ((iw - 75) // 12)
+                    for r in (0, 1):
+                        py = dy + 20 + r * 11
+                        pygame.draw.rect(surface, (15, 20, 28), (px, py, 9, 9), border_radius=1)
+                        is_lit = (math.sin(now * 16.0 + c * 3.7 + r * 2.1) * math.cos(now * 21.0 + c * 1.5)) > 0.1
+                        led_col = (25, 240, 85) if is_lit else (10, 75, 25)
+                        pygame.draw.rect(surface, led_col, (px + 2, py - 2 if r == 0 else py + 9, 5, 2))
+                        p_coords[f"r2_dist_p_{c}_{r}"] = (px + 4, py + 4)
+
+                # SFP+ Uplinks on right
+                for u_i in range(2):
+                    ux = ix2 + iw - 40 + u_i * 16
+                    uy = dy + 20
+                    pygame.draw.rect(surface, (185, 195, 210), (ux, uy, 12, 18), border_radius=2)
+                    pygame.draw.rect(surface, (60, 70, 85), (ux + 2, uy + 4, 8, 10))
+                    p_coords[f"r2_dist_sfp_{u_i}"] = (ux + 6, uy + 9)
+
+            elif stype == "patch_a":
+                # Catalyst 2960-X Access Switch (Office LAN)
+                pygame.draw.rect(surface, (28, 36, 48), dev_rect)
+                pygame.draw.rect(surface, (25, 165, 85), (ix2, dy, 4, sh))
+                lbl = self.font_rack_nano.render("CATALYST 2960-X (ACCESS LAN)", True, (215, 235, 255))
+                surface.blit(lbl, (ix2 + 8, dy + 2))
+                for c in range(16):
+                    px = ix2 + 8 + c * ((iw - 20) // 16)
+                    py = dy + 14
+                    pygame.draw.rect(surface, (15, 20, 28), (px, py, 7, 10), border_radius=1)
+                    # Green PoE LED
+                    pygame.draw.rect(surface, (25, 235, 80), (px + 1, py - 2, 4, 1))
+                    p_coords[f"r2_acc_p_{c}"] = (px + 3, py + 5)
+
+            elif stype == "switch_core1":
+                # 24-Port Cat6 Patch Panel 2B (Field User Drops)
+                pygame.draw.rect(surface, (22, 26, 34), dev_rect)
+                p_lbl = self.font_rack_nano.render("PATCH PANEL 2B // USER DROPS 1-24", True, (160, 180, 205))
+                surface.blit(p_lbl, (ix2 + 8, dy + 2))
+                port_idx = 0
+                for grp in range(4):
+                    gx = ix2 + 10 + grp * (iw - 20) // 4
+                    for pi in range(6):
+                        px = gx + pi * ((iw - 20) // 25)
+                        py = dy + 16
+                        pygame.draw.rect(surface, (14, 18, 24), (px, py, 8, 11), border_radius=1)
+                        pygame.draw.rect(surface, (160, 140, 40), (px + 2, py + 2, 4, 3))
+                        p_coords[f"r2_patch_{port_idx}"] = (px + 4, py + 5)
+                        port_idx += 1
+
+            elif stype == "switch_core2":
+                # Slotted Wire Manager
+                pygame.draw.rect(surface, (20, 24, 32), dev_rect)
+                for rx_i in range(5):
+                    dx_ring = ix2 + 25 + rx_i * ((iw - 50) // 4)
+                    pygame.draw.circle(surface, (160, 175, 195), (dx_ring, dy + sh // 2), 7, 2)
+                    pygame.draw.line(surface, (0, 120, 240), (dx_ring - 12, dy + sh // 2 - 1), (dx_ring + 12, dy + sh // 2 - 1), 2)
+                    pygame.draw.line(surface, (245, 120, 25), (dx_ring - 12, dy + sh // 2 + 2), (dx_ring + 12, dy + sh // 2 + 2), 2)
+
+            elif stype == "wire_mgr":
+                # In Rack 2: Palo Alto PA-850 Next-Gen Firewall
+                pygame.draw.rect(surface, (32, 36, 44), dev_rect)
+                pygame.draw.rect(surface, (245, 115, 25), (ix2, dy, 4, sh))
+                fw_lbl = self.font_rack_micro.render("PALO ALTO PA-850", True, (245, 130, 35))
+                surface.blit(fw_lbl, (ix2 + 8, dy + 5))
+                # HA-1 & HA-2 sync ports on left
+                p_coords["r2_fw_ha1"] = (ix2 + 110, dy + 12)
+                p_coords["r2_fw_ha2"] = (ix2 + 125, dy + 12)
+                pygame.draw.rect(surface, (240, 110, 25), (ix2 + 106, dy + 8, 8, 9), border_radius=1)
+                pygame.draw.rect(surface, (240, 110, 25), (ix2 + 121, dy + 8, 8, 9), border_radius=1)
+
+            elif stype == "firewall":
+                # Network Traffic Flow Analyzer & Tap (Animated VU Meter Bar Graph!)
+                pygame.draw.rect(surface, (26, 32, 42), dev_rect)
+                lbl = self.font_rack_nano.render("FLOW ANALYZER // PACKET METER", True, (0, 215, 255))
+                surface.blit(lbl, (ix2 + 8, dy + 3))
+
+                # Real-Time Animated 12-Segment Throughput VU Meter
+                bar_count = int(7 + 3.5 * math.sin(now * 3.2) + 1.5 * math.cos(now * 6.8))
+                bar_count = max(2, min(12, bar_count))
+                for seg_i in range(12):
+                    sx = ix2 + 10 + seg_i * 9
+                    sy_b = dy + 16
+                    if seg_i < 7:
+                        base_col = (30, 240, 90)
+                    elif seg_i < 10:
+                        base_col = (255, 205, 30)
+                    else:
+                        base_col = (255, 45, 45)
+
+                    c_val = base_col if (seg_i < bar_count) else (max(10, base_col[0]//5), max(10, base_col[1]//5), max(10, base_col[2]//5))
+                    pygame.draw.rect(surface, c_val, (sx, sy_b, 6, 12), border_radius=1)
+
+                # Tap monitoring ports on right
+                p_coords["r2_tap_1"] = (ix2 + iw - 35, dy + 22)
+                p_coords["r2_tap_2"] = (ix2 + iw - 18, dy + 22)
+                pygame.draw.rect(surface, (230, 180, 20), (ix2 + iw - 39, dy + 17, 8, 10), border_radius=1)
+                pygame.draw.rect(surface, (230, 180, 20), (ix2 + iw - 22, dy + 17, 8, 10), border_radius=1)
+
+            elif stype == "fiber_liu":
+                # 1U KVM Console Drawer
+                pygame.draw.rect(surface, (24, 28, 36), dev_rect)
+                pygame.draw.rect(surface, (55, 65, 80), dev_rect, width=1)
+                # Chrome pull handle
+                pygame.draw.rect(surface, (180, 195, 215), (ix2 + (iw - 60)//2, dy + 8, 60, 6), border_radius=3)
+                lbl = self.font_rack_nano.render("17-INCH RACK CONSOLE KVM", True, (140, 160, 185))
+                surface.blit(lbl, (ix2 + 8, dy + 6))
+
+            elif stype in ("server_san", "server_host"):
+                # HPE ProLiant DL380 Gen10 Servers (Iconic silver lattice grille)
+                pygame.draw.rect(surface, (36, 42, 50), dev_rect)
+                pygame.draw.rect(surface, (70, 80, 95), dev_rect, width=1)
+                # Silver lattice bezel
+                pygame.draw.rect(surface, (170, 180, 195), (ix2 + 4, dy + 4, iw - 8, 12), border_radius=1)
+                hpe_name = "HPE PROLIANT DL380 GEN10 #1" if stype == "server_san" else "HPE PROLIANT DL380 GEN10 #2"
+                lbl = self.font_rack_nano.render(hpe_name, True, (20, 30, 45))
+                surface.blit(lbl, (ix2 + 8, dy + 4))
+
+                # UID Blue Beacon LED (Classic 1-second blink)
+                uid_on = (int(now * 2.0) % 2 == 0)
+                uid_col = (0, 190, 255) if uid_on else (0, 45, 80)
+                pygame.draw.circle(surface, uid_col, (ix2 + iw - 16, dy + 10), 3)
+
+                # 8x Hot-Swap Drive Bays with Activity Lights
+                d_w = (iw - 18) // 8
+                hpe_id = 1 if stype == "server_san" else 2
+                for d_i in range(8):
+                    dx = ix2 + 6 + d_i * d_w
+                    dy_c = dy + 20
+                    pygame.draw.rect(surface, (22, 26, 34), (dx, dy_c, d_w - 3, 30), border_radius=2)
+                    pygame.draw.rect(surface, (55, 65, 78), (dx, dy_c, d_w - 3, 30), width=1, border_radius=2)
+                    # SmartDrive circular activity ring LED
+                    d_act = (math.sin(now * 24.0 + d_i * 3.9 + hpe_id * 5.2) + math.sin(now * 33.0 + d_i * 2.1)) > 0.4
+                    d_col = (255, 195, 30) if d_act else (50, 40, 15)
+                    pygame.draw.circle(surface, (25, 230, 80), (dx + 4, dy_c + 4), 2)
+                    pygame.draw.circle(surface, d_col, (dx + d_w - 7, dy_c + 4), 2)
+
+                p_coords[f"r2_srv{hpe_id}_nic1"] = (ix2 + 15, dy + sh - 8)
+                p_coords[f"r2_srv{hpe_id}_nic2"] = (ix2 + 35, dy + sh - 8)
+
+            elif stype == "sensor":
+                # Environmental Hub NetBotz
+                pygame.draw.rect(surface, (24, 28, 36), dev_rect)
+                sens_text = f"RACK-02 // TEMP: {temp_c:.1f}C  HUMIDITY: 45%"
+                s_surf = self.font_rack_nano.render(sens_text, True, (30, 240, 110))
+                surface.blit(s_surf, (ix2 + 8, dy + 10))
+
+            elif stype == "ups":
+                # Eaton 9PX Smart Enterprise PDU / UPS
+                pygame.draw.rect(surface, (20, 24, 32), dev_rect)
+                pygame.draw.rect(surface, (50, 60, 75), dev_rect, width=1)
+                lbl = self.font_rack_micro.render("EATON 9PX 3000VA UPS", True, (215, 228, 245))
+                surface.blit(lbl, (ix2 + 10, dy + 6))
+                # Status gauge
+                for b_i in range(5):
+                    bx = ix2 + 10 + b_i * 12
+                    pygame.draw.rect(surface, (25, 235, 90), (bx, dy + 26, 8, 16), border_radius=1)
+                lcd_txt = self.font_rack_nano.render("OUTPUT: 230V / ONLINE", True, (0, 215, 255))
+                surface.blit(lcd_txt, (ix2 + 85, dy + 28))
+
+        # -------------------------------------------------------------------------
+        # 4. PATCH CABLES: INTRA-RACK & CROSS-RACK CABLING (โยงสายในตู้และข้ามตู้)
+        # -------------------------------------------------------------------------
+        c_blue = (0, 125, 245)
+        c_mint = (20, 220, 115)
+        c_yellow = (255, 205, 25)
+        c_orange = (255, 115, 25)
+        c_purple = (165, 65, 235)
+        c_aqua = (0, 225, 245)
+        c_red = (235, 45, 55)
+
+        # ----------------- A. INTRA-RACK 1 CABLING -----------------
+        # Patch Panel A -> Core Switch 1 (6 patch cords looping in neat arcs)
+        for i, col in enumerate([c_blue, c_mint, c_yellow, c_blue, c_orange, c_purple]):
+            p_src = p_coords.get(f"r1_patch_{i * 2 + 1}")
+            p_dst = p_coords.get(f"r1_sw1_p_{i * 3 + 1}_0")
+            if p_src and p_dst:
+                c1 = (p_src[0], p_src[1] + 16)
+                c2 = (p_dst[0], p_dst[1] - 16)
+                self._draw_menu_bezier_cable(surface, p_src, c1, c2, p_dst, col, width=2)
+
+        # Core Switch 1 -> Core Switch 2 (Stack links & local patching)
+        for i, col in enumerate([c_blue, c_mint, c_orange, c_yellow]):
+            p_src = p_coords.get(f"r1_sw1_p_{i * 4 + 2}_1")
+            p_dst = p_coords.get(f"r1_sw2_p_{i * 4 + 2}_0")
+            if p_src and p_dst:
+                c1 = (p_src[0] - 8, p_src[1] + 12)
+                c2 = (p_dst[0] - 8, p_dst[1] - 12)
+                self._draw_menu_bezier_cable(surface, p_src, c1, c2, p_dst, col, width=2)
+
+        # Core Router SFP+ -> Core Switch 1 SFP+ (Fiber cords looping neatly)
+        r_sfp0 = p_coords.get("r1_router_sfp_0")
+        sw_sfp0 = p_coords.get("r1_sw1_sfp_0")
+        if r_sfp0 and sw_sfp0:
+            c1 = (r1_x + rw - 12, r_sfp0[1] + 20)
+            c2 = (r1_x + rw - 12, sw_sfp0[1] - 20)
+            self._draw_menu_bezier_cable(surface, r_sfp0, c1, c2, sw_sfp0, c_aqua, width=2)
+
+        r_sfp1 = p_coords.get("r1_router_sfp_1")
+        sw_sfp1 = p_coords.get("r1_sw1_sfp_1")
+        if r_sfp1 and sw_sfp1:
+            c1 = (r1_x + rw - 8, r_sfp1[1] + 18)
+            c2 = (r1_x + rw - 8, sw_sfp1[1] - 18)
+            self._draw_menu_bezier_cable(surface, r_sfp1, c1, c2, sw_sfp1, c_yellow, width=2)
+
+        # Fiber ODF -> Core Switch 2 SFP+
+        fib0 = p_coords.get("r1_fiber_2")
+        sw2_sfp0 = p_coords.get("r1_sw2_sfp_0")
+        if fib0 and sw2_sfp0:
+            c1 = (r1_x + rw - 10, fib0[1] - 30)
+            c2 = (r1_x + rw - 10, sw2_sfp0[1] + 30)
+            self._draw_menu_bezier_cable(surface, fib0, c1, c2, sw2_sfp0, c_aqua, width=2)
+
+        # Storage Server 1 -> Core Switch 2 (10G DAC cables)
+        srv1_nic = p_coords.get("r1_srv1_nic1")
+        sw2_p = p_coords.get("r1_sw2_p_18_1")
+        if srv1_nic and sw2_p:
+            c1 = (srv1_nic[0] - 15, srv1_nic[1] - 35)
+            c2 = (sw2_p[0] + 15, sw2_p[1] + 35)
+            self._draw_menu_bezier_cable(surface, srv1_nic, c1, c2, sw2_p, c_purple, width=2)
+
+        # ----------------- B. INTRA-RACK 2 CABLING -----------------
+        # Distribution Switch -> Access Switch
+        for i, col in enumerate([c_blue, c_mint, c_yellow, c_orange]):
+            p_src = p_coords.get(f"r2_dist_p_{i * 2 + 1}_1")
+            p_dst = p_coords.get(f"r2_acc_p_{i * 3 + 1}")
+            if p_src and p_dst:
+                c1 = (p_src[0], p_src[1] + 14)
+                c2 = (p_dst[0], p_dst[1] - 14)
+                self._draw_menu_bezier_cable(surface, p_src, c1, c2, p_dst, col, width=2)
+
+        # Patch Panel 2B -> Access Switch
+        for i, col in enumerate([c_blue, c_mint, c_yellow, c_purple, c_orange]):
+            p_src = p_coords.get(f"r2_patch_{i * 3 + 2}")
+            p_dst = p_coords.get(f"r2_acc_p_{i * 2 + 3}")
+            if p_src and p_dst:
+                c1 = (p_src[0] - 4, p_src[1] - 16)
+                c2 = (p_dst[0] - 4, p_dst[1] + 16)
+                self._draw_menu_bezier_cable(surface, p_src, c1, c2, p_dst, col, width=2)
+
+        # Access Switch -> HPE Server 1
+        hpe1_nic = p_coords.get("r2_srv1_nic1")
+        acc_p0 = p_coords.get("r2_acc_p_0")
+        if hpe1_nic and acc_p0:
+            c1 = (ix2 + 6, acc_p0[1] + 50)
+            c2 = (ix2 + 6, hpe1_nic[1] - 50)
+            self._draw_menu_bezier_cable(surface, acc_p0, c1, c2, hpe1_nic, c_blue, width=2)
+
+        # Access Switch -> HPE Server 2
+        hpe2_nic = p_coords.get("r2_srv2_nic1")
+        acc_p1 = p_coords.get("r2_acc_p_2")
+        if hpe2_nic and acc_p1:
+            c1 = (ix2 + 10, acc_p1[1] + 65)
+            c2 = (ix2 + 10, hpe2_nic[1] - 65)
+            self._draw_menu_bezier_cable(surface, acc_p1, c1, c2, hpe2_nic, c_mint, width=2)
+
+        # Packet Analyzer Tap -> Distribution Switch
+        tap1 = p_coords.get("r2_tap_1")
+        dist_sfp1 = p_coords.get("r2_dist_sfp_1")
+        if tap1 and dist_sfp1:
+            c1 = (r2_x + rw - 12, tap1[1] - 40)
+            c2 = (r2_x + rw - 12, dist_sfp1[1] + 40)
+            self._draw_menu_bezier_cable(surface, tap1, c1, c2, dist_sfp1, c_yellow, width=2)
+
+        # ----------------- C. CROSS-RACK CABLING (โยงข้ามระหว่าง 2 ตู้!) -----------------
+        # 1. Direct Cross-Connects Across Middle Gap (Trunk Links)
+        # Trunk 1: Core Switch 1 (Rack 1) -> Dist Switch (Rack 2) [Cisco Blue]
+        sw1_sfp3 = p_coords.get("r1_sw1_sfp_3")
+        dist_sfp0 = p_coords.get("r2_dist_sfp_0")
+        if sw1_sfp3 and dist_sfp0:
+            mid_x = (sw1_sfp3[0] + dist_sfp0[0]) // 2
+            c1 = (mid_x - 10, sw1_sfp3[1] + 28)
+            c2 = (mid_x + 10, dist_sfp0[1] + 28)
+            self._draw_menu_bezier_cable(surface, sw1_sfp3, c1, c2, dist_sfp0, c_blue, width=3)
+
+        # Trunk 2: Core Switch 2 (Rack 1) -> Access Switch (Rack 2) [Mint Green]
+        sw2_sfp2 = p_coords.get("r1_sw2_sfp_2")
+        acc_p15 = p_coords.get("r2_acc_p_15")
+        if sw2_sfp2 and acc_p15:
+            mid_x = (sw2_sfp2[0] + acc_p15[0]) // 2
+            c1 = (mid_x - 12, sw2_sfp2[1] + 34)
+            c2 = (mid_x + 12, acc_p15[1] + 34)
+            self._draw_menu_bezier_cable(surface, sw2_sfp2, c1, c2, acc_p15, c_mint, width=2)
+
+        # Trunk 3: Core Switch 2 (Rack 1) -> Dist Switch (Rack 2) [Bright Orange]
+        sw2_sfp3 = p_coords.get("r1_sw2_sfp_3")
+        dist_p11 = p_coords.get("r2_dist_p_11_0")
+        if sw2_sfp3 and dist_p11:
+            mid_x = (sw2_sfp3[0] + dist_p11[0]) // 2
+            c1 = (mid_x - 8, sw2_sfp3[1] + 44)
+            c2 = (mid_x + 8, dist_p11[1] + 44)
+            self._draw_menu_bezier_cable(surface, sw2_sfp3, c1, c2, dist_p11, c_orange, width=2)
+
+        # Trunk 4: Storage SAN (Rack 1) -> HPE Compute Cluster (Rack 2) [Purple 10G SAN Fabric]
+        srv1_nic2 = p_coords.get("r1_srv1_nic2")
+        hpe1_nic2 = p_coords.get("r2_srv1_nic2")
+        if srv1_nic2 and hpe1_nic2:
+            mid_x = (srv1_nic2[0] + hpe1_nic2[0]) // 2
+            c1 = (mid_x - 10, srv1_nic2[1] + 32)
+            c2 = (mid_x + 10, hpe1_nic2[1] + 32)
+            self._draw_menu_bezier_cable(surface, srv1_nic2, c1, c2, hpe1_nic2, c_purple, width=2)
+
+        # 2. Firewall High-Availability (HA) Cross-Sync Cable [Crimson Red]
+        fw1_ha1 = p_coords.get("r1_fw_ha1")
+        fw2_ha1 = p_coords.get("r2_fw_ha1")
+        if fw1_ha1 and fw2_ha1:
+            mid_x = (fw1_ha1[0] + fw2_ha1[0]) // 2
+            c1 = (mid_x - 10, fw1_ha1[1] + 30)
+            c2 = (mid_x + 10, fw2_ha1[1] + 30)
+            self._draw_menu_bezier_cable(surface, fw1_ha1, c1, c2, fw2_ha1, c_red, width=2)
+
+        # 3. Overhead Ladder Waterfall Fiber Optic Cables (Entering through Top Brush Panels on right side)
+        # Yellow Single-Mode Fiber: Router SFP+ -> Top Brush R1 -> Overhead Tray -> Top Brush R2 -> Dist SFP+
+        r_sfp3 = p_coords.get("r1_router_sfp_3")
+        dist_sfp1_pt = p_coords.get("r2_dist_sfp_1")
+        if r_sfp3 and dist_sfp1_pt:
+            r1_brush_pt = (ix1 + iw - 25, bay_top + 10)
+            r2_brush_pt = (ix2 + iw - 25, bay_top + 10)
+            tray_drop1 = (ix1 + iw - 25, tray_y + 12)
+            tray_drop2 = (ix2 + iw - 25, tray_y + 12)
+
+            # R1 Router SFP+ -> R1 Brush
+            self._draw_menu_bezier_cable(surface, r_sfp3, (r_sfp3[0] + 8, r_sfp3[1] - 12), (r1_brush_pt[0] + 4, r1_brush_pt[1] + 12), r1_brush_pt, c_yellow, width=2)
+            # R1 Brush -> Tray Drop 1
+            pygame.draw.line(surface, c_yellow, r1_brush_pt, tray_drop1, 2)
+            # Horizontal across Tray
+            pygame.draw.line(surface, c_yellow, tray_drop1, tray_drop2, 2)
+            # Tray Drop 2 -> R2 Brush
+            pygame.draw.line(surface, c_yellow, tray_drop2, r2_brush_pt, 2)
+            # R2 Brush -> Dist SFP+
+            self._draw_menu_bezier_cable(surface, r2_brush_pt, (r2_brush_pt[0] - 6, r2_brush_pt[1] + 12), (dist_sfp1_pt[0] + 6, dist_sfp1_pt[1] - 12), dist_sfp1_pt, c_yellow, width=2)
+
+        # Aqua Multi-Mode Fiber: Core Switch 1 SFP+ -> Top Tray -> Access Switch SFP+
+        sw1_sfp2 = p_coords.get("r1_sw1_sfp_2")
+        acc_p14 = p_coords.get("r2_acc_p_14")
+        if sw1_sfp2 and acc_p14:
+            r1_brush_pt2 = (ix1 + iw - 45, bay_top + 10)
+            r2_brush_pt2 = (ix2 + 25, bay_top + 10)
+            tray_drop1_a = (ix1 + iw - 45, tray_y + 14)
+            tray_drop2_a = (ix2 + 25, tray_y + 14)
+
+            self._draw_menu_bezier_cable(surface, sw1_sfp2, (sw1_sfp2[0] + 12, sw1_sfp2[1] - 35), (r1_brush_pt2[0] + 8, r1_brush_pt2[1] + 20), r1_brush_pt2, c_aqua, width=2)
+            pygame.draw.line(surface, c_aqua, r1_brush_pt2, tray_drop1_a, 2)
+            pygame.draw.line(surface, c_aqua, tray_drop1_a, tray_drop2_a, 2)
+            pygame.draw.line(surface, c_aqua, tray_drop2_a, r2_brush_pt2, 2)
+            self._draw_menu_bezier_cable(surface, r2_brush_pt2, (r2_brush_pt2[0] - 8, r2_brush_pt2[1] + 20), (acc_p14[0] - 8, acc_p14[1] - 25), acc_p14, c_aqua, width=2)
 
     def _render_pause_menu(self, surface, w, h):
         # Semi-transparent light frosted overlay

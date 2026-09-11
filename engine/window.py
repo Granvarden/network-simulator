@@ -11,6 +11,16 @@ class WindowManager:
         self.title = title
         self.is_fullscreen = False
 
+        # Enable Per-Monitor High-DPI Awareness on Windows to prevent OS blur
+        try:
+            import ctypes
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)
+            except Exception:
+                ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
         info = pygame.display.Info()
         self.desktop_w = info.current_w if info.current_w > 0 else 1920
         self.desktop_h = info.current_h if info.current_h > 0 else 1080
@@ -34,8 +44,28 @@ class WindowManager:
 
         pygame.display.set_caption(self.title)
 
+        # High-Fidelity OpenGL Context Attributes
+        pygame.display.gl_set_attribute(pygame.GL_DEPTH_SIZE, 24)
+        pygame.display.gl_set_attribute(pygame.GL_DOUBLEBUFFER, 1)
+
         self.flags = pygame.OPENGL | pygame.DOUBLEBUF | pygame.RESIZABLE
-        self.screen = pygame.display.set_mode((self.width, self.height), self.flags)
+
+        # Enable Hardware Multisample Anti-Aliasing (4x MSAA, fallback to 2x or 0x)
+        screen_created = False
+        for samples in (4, 2):
+            try:
+                pygame.display.gl_set_attribute(pygame.GL_MULTISAMPLEBUFFERS, 1)
+                pygame.display.gl_set_attribute(pygame.GL_MULTISAMPLESAMPLES, samples)
+                self.screen = pygame.display.set_mode((self.width, self.height), self.flags)
+                screen_created = True
+                break
+            except Exception:
+                continue
+
+        if not screen_created:
+            pygame.display.gl_set_attribute(pygame.GL_MULTISAMPLEBUFFERS, 0)
+            pygame.display.gl_set_attribute(pygame.GL_MULTISAMPLESAMPLES, 0)
+            self.screen = pygame.display.set_mode((self.width, self.height), self.flags)
 
         # Maximize the window on Windows while keeping the taskbar visible
         try:

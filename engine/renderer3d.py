@@ -30,12 +30,16 @@ class Renderer3D:
         self.workbench_display_list = None
         self.laptop_win_display_list = None
         self.laptop_linux_display_list = None
+        self.cables_display_list = None
+        self._cables_cache_key = None
+        self._device_display_lists = set()
 
     def init_gl(self, width, height):
         glViewport(0, 0, width, height)
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
-        gluPerspective(self.fov, float(width) / float(max(1, height)), 0.05, 100.0)
+        # Near plane at 0.08m provides 2x depth buffer resolution, eliminating z-fighting and shimmering
+        gluPerspective(self.fov, float(width) / float(max(1, height)), 0.08, 100.0)
         glMatrixMode(GL_MODELVIEW)
 
         glEnable(GL_DEPTH_TEST)
@@ -43,12 +47,25 @@ class Renderer3D:
         glShadeModel(GL_SMOOTH)
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+        # Hardware Anti-Aliasing & Line Smoothing for ultra-sharp edges
+        try:
+            glEnable(GL_MULTISAMPLE)
+        except Exception:
+            pass
+
+        try:
+            glEnable(GL_LINE_SMOOTH)
+            glHint(GL_LINE_SMOOTH_HINT, GL_NICEST)
+        except Exception:
+            pass
+
         glClearColor(0.88, 0.91, 0.95, 1.0)
         self._delete_display_lists()
 
     def _delete_display_lists(self):
         for attr in ("room_display_list", "racks_display_list", "workbench_display_list",
-                     "laptop_win_display_list", "laptop_linux_display_list"):
+                     "laptop_win_display_list", "laptop_linux_display_list", "cables_display_list"):
             l_id = getattr(self, attr, None)
             if l_id is not None:
                 try:
@@ -56,6 +73,27 @@ class Renderer3D:
                 except Exception:
                     pass
                 setattr(self, attr, None)
+        self._cables_cache_key = None
+
+        # Clean up all allocated device display lists
+        for dl in list(self._device_display_lists):
+            try:
+                glDeleteLists(dl, 1)
+            except Exception:
+                pass
+        self._device_display_lists.clear()
+
+    def invalidate_device(self, dev):
+        """Invalidates and frees cached display lists for a specific device."""
+        for attr in ("_dl_front", "_dl_rear"):
+            dl = getattr(dev, attr, None)
+            if dl is not None:
+                try:
+                    glDeleteLists(dl, 1)
+                except Exception:
+                    pass
+                self._device_display_lists.discard(dl)
+                setattr(dev, attr, None)
 
     def _init_display_lists(self):
         self._delete_display_lists()
@@ -110,10 +148,10 @@ class Renderer3D:
         self._render_workbench(now)
 
         # 4. Render High-Detail Network Devices inside Racks
-        self._render_devices(devices, now)
+        self._render_devices(devices, now, camera=camera)
 
-        # 5. Render 3D Cables with Catenary Sag & Snagless Boots
-        self._render_cables(cables)
+        # 5. Render 3D Cables with Catenary Sag, Anti-Clipping & Authentic RJ45 Connectors
+        self._render_cables(cables, devices, camera=camera)
 
         # 6. Render Aim Selection Highlight (Crosshair target)
         if focused_dev:
@@ -285,6 +323,142 @@ class Renderer3D:
             glVertex3f(tx, 2.12, -1.5)
         glEnd()
 
+        # 7. Enterprise Precision CRAC / Cooling Units (on Right Wall at X = 5.25)
+        for crac_z in [-2.0, 1.8]:
+            # Main CRAC Enclosure (Charcoal / Titanium Gray)
+            self._draw_box(5.25, 1.20, crac_z, 0.95, 2.40, 1.25, (0.16, 0.18, 0.22))
+            # Recessed Front Air Intake Grille (Black with dark louvers)
+            self._draw_box(4.76, 0.85, crac_z, 0.02, 1.40, 1.10, (0.07, 0.08, 0.10))
+            for lvr in range(11):
+                ly = 0.25 + lvr * 0.12
+                self._draw_box(4.75, ly, crac_z, 0.015, 0.025, 1.06, (0.28, 0.32, 0.38))
+            # Climate Telemetry Touchscreen & Controller Panel
+            self._draw_box(4.76, 1.85, crac_z, 0.02, 0.32, 0.45, (0.11, 0.13, 0.16))
+            self._draw_box(4.75, 1.85, crac_z, 0.015, 0.24, 0.35, (0.02, 0.15, 0.35))  # Deep Blue LCD Screen
+            # Schneider / APC Brand Stripe
+            self._draw_box(4.76, 2.15, crac_z, 0.02, 0.04, 1.10, (0.0, 0.65, 0.35))
+            # Overhead Discharge Plenum Hood connecting to ceiling
+            self._draw_box(5.25, 2.65, crac_z, 0.80, 0.50, 1.05, (0.22, 0.25, 0.30))
+
+        # 8. Datacenter Security Double Doors & Emergency Exit (on Right Wall at X = 5.96, Z = -4.2)
+        # Door Frame (Heavy-Duty Slate Anodized Aluminum)
+        self._draw_box(5.96, 1.18, -4.2, 0.04, 2.36, 1.86, (0.15, 0.17, 0.20))
+        # Left & Right Leaf Doors
+        for d_z in [-4.63, -3.77]:
+            self._draw_box(5.95, 1.15, d_z, 0.03, 2.26, 0.82, (0.75, 0.78, 0.84))
+            # Brushed Stainless Steel Kickplate at bottom
+            self._draw_box(5.93, 0.20, d_z, 0.015, 0.35, 0.78, (0.58, 0.62, 0.68))
+            # Reinforced Safety Glass Window (Narrow Vertical Vision Panel)
+            self._draw_box(5.93, 1.45, d_z, 0.02, 0.75, 0.22, (0.12, 0.22, 0.30))
+            self._draw_box(5.92, 1.45, d_z, 0.01, 0.70, 0.18, (0.65, 0.82, 0.95))
+            # Red Emergency Crash Push-Bar
+            self._draw_box(5.90, 0.98, d_z, 0.04, 0.05, 0.70, (0.85, 0.15, 0.15))
+
+        # Overhead Illuminated Green Emergency "EXIT" Sign above double doors
+        self._draw_box(5.88, 2.50, -4.2, 0.06, 0.18, 0.46, (0.12, 0.14, 0.18))
+        self._draw_box(5.84, 2.50, -4.2, 0.02, 0.14, 0.40, (0.10, 0.92, 0.30))
+
+        # Biometric Hand Scanner & Badge Reader by Security Doors
+        self._draw_box(5.96, 1.35, -3.15, 0.03, 0.22, 0.15, (0.12, 0.14, 0.18))
+        self._draw_box(5.94, 1.38, -3.15, 0.02, 0.08, 0.08, (0.0, 0.65, 0.95))
+
+        # 9. Clean-Agent Fire Suppression System (FM-200 / Novec Cylinders on Left Wall)
+        for cyl_z in [-4.3, -3.8]:
+            self._draw_box(-5.75, 0.95, cyl_z, 0.34, 1.65, 0.34, (0.85, 0.12, 0.12))  # Cylinder body
+            self._draw_box(-5.75, 1.82, cyl_z, 0.24, 0.10, 0.24, (0.70, 0.10, 0.10))  # Dome cap
+            self._draw_box(-5.75, 1.92, cyl_z, 0.10, 0.12, 0.10, (0.75, 0.65, 0.20))  # Brass discharge valve
+            self._draw_box(-5.86, 0.65, cyl_z, 0.15, 0.04, 0.38, (0.25, 0.28, 0.32))
+            self._draw_box(-5.86, 1.45, cyl_z, 0.15, 0.04, 0.38, (0.25, 0.28, 0.32))
+
+        # Chrome High-Pressure Manifold Pipe connecting to ceiling
+        self._draw_box(-5.75, 2.05, -4.05, 0.06, 0.06, 0.65, (0.80, 0.84, 0.90))
+        self._draw_box(-5.75, 2.45, -4.05, 0.06, 0.75, 0.06, (0.80, 0.84, 0.90))
+
+        # Caution Discharge System Warning Sign
+        self._draw_box(-5.97, 1.95, -3.2, 0.02, 0.26, 0.36, (0.95, 0.85, 0.10))
+        self._draw_box(-5.96, 1.95, -3.2, 0.01, 0.20, 0.30, (0.10, 0.10, 0.12))
+
+        # Wall-Mounted CO2 Fire Extinguisher
+        self._draw_box(-5.95, 1.05, -3.2, 0.15, 0.65, 0.15, (0.88, 0.10, 0.10))
+        self._draw_box(-5.94, 1.42, -3.2, 0.08, 0.10, 0.08, (0.15, 0.16, 0.18))
+        self._draw_box(-5.92, 1.25, -3.12, 0.04, 0.25, 0.04, (0.10, 0.10, 0.12))
+
+        # 10. Large Magnetic Network Architecture Whiteboard (Facing Workbench on Left Wall)
+        self._draw_box(-5.98, 1.65, 0.5, 0.02, 1.18, 2.24, (0.65, 0.68, 0.74))
+        self._draw_box(-5.96, 1.65, 0.5, 0.01, 1.10, 2.16, (0.96, 0.97, 0.99))
+        self._draw_box(-5.94, 1.06, 0.5, 0.06, 0.02, 2.20, (0.50, 0.54, 0.60))
+
+        # Markers on tray (Blue, Red, Green, Black) and Felt Eraser
+        self._draw_box(-5.92, 1.08, 0.15, 0.015, 0.015, 0.12, (0.0, 0.45, 0.95))
+        self._draw_box(-5.92, 1.08, 0.30, 0.015, 0.015, 0.12, (0.90, 0.15, 0.15))
+        self._draw_box(-5.92, 1.08, 0.45, 0.015, 0.015, 0.12, (0.05, 0.80, 0.35))
+        self._draw_box(-5.92, 1.08, 0.60, 0.015, 0.015, 0.12, (0.12, 0.12, 0.15))
+        self._draw_box(-5.92, 1.09, 0.85, 0.040, 0.030, 0.14, (0.25, 0.25, 0.28))
+
+        # Sketched Enterprise Network Topology Diagram on Whiteboard
+        self._draw_box(-5.95, 1.95, 0.5, 0.005, 0.10, 0.28, (0.15, 0.45, 0.85))
+        self._draw_box(-5.95, 1.65, 0.15, 0.005, 0.08, 0.22, (0.0, 0.68, 0.85))
+        self._draw_box(-5.95, 1.65, 0.85, 0.005, 0.08, 0.22, (0.0, 0.68, 0.85))
+        self._draw_box(-5.95, 1.35, -0.15, 0.005, 0.06, 0.18, (0.10, 0.70, 0.40))
+        self._draw_box(-5.95, 1.35, 0.45, 0.005, 0.06, 0.18, (0.10, 0.70, 0.40))
+        self._draw_box(-5.95, 1.35, 1.05, 0.005, 0.06, 0.18, (0.10, 0.70, 0.40))
+        glLineWidth(2.0)
+        glColor3f(0.20, 0.25, 0.35)
+        glBegin(GL_LINES)
+        glVertex3f(-5.94, 1.90, 0.5); glVertex3f(-5.94, 1.70, 0.15)
+        glVertex3f(-5.94, 1.90, 0.5); glVertex3f(-5.94, 1.70, 0.85)
+        glColor3f(0.85, 0.20, 0.20)
+        glVertex3f(-5.94, 1.65, 0.26); glVertex3f(-5.94, 1.65, 0.74)
+        glColor3f(0.15, 0.45, 0.85)
+        glVertex3f(-5.94, 1.60, 0.15); glVertex3f(-5.94, 1.40, -0.15)
+        glVertex3f(-5.94, 1.60, 0.15); glVertex3f(-5.94, 1.40, 0.45)
+        glVertex3f(-5.94, 1.60, 0.85); glVertex3f(-5.94, 1.40, 0.45)
+        glVertex3f(-5.94, 1.60, 0.85); glVertex3f(-5.94, 1.40, 1.05)
+        glEnd()
+
+        # Sticky Notes on Whiteboard
+        self._draw_box(-5.95, 1.92, 1.15, 0.004, 0.08, 0.08, (0.95, 0.90, 0.20))
+        self._draw_box(-5.95, 1.80, 1.25, 0.004, 0.08, 0.08, (0.95, 0.40, 0.65))
+        self._draw_box(-5.95, 1.92, -0.25, 0.004, 0.08, 0.08, (0.45, 0.95, 0.45))
+
+        # 11. 3-Phase Main Power Distribution Sub-Panel (on Back Wall at X = -4.0, Z = -5.96)
+        self._draw_box(-4.0, 1.45, -5.96, 0.75, 1.15, 0.16, (0.72, 0.75, 0.80))
+        self._draw_box(-4.0, 1.45, -5.87, 0.71, 1.09, 0.02, (0.64, 0.67, 0.72))
+        self._draw_box(-3.85, 1.65, -5.85, 0.12, 0.12, 0.03, (0.92, 0.78, 0.10))
+        self._draw_box(-3.85, 1.65, -5.83, 0.04, 0.09, 0.03, (0.85, 0.15, 0.15))
+        self._draw_box(-4.15, 1.65, -5.85, 0.16, 0.12, 0.02, (0.10, 0.12, 0.15))
+        self._draw_box(-4.15, 1.65, -5.84, 0.13, 0.08, 0.01, (0.05, 0.85, 0.35))
+        self._draw_box(-4.0, 1.25, -5.85, 0.14, 0.12, 0.01, (0.95, 0.82, 0.08))
+
+        # 12. Overhead Industrial Galvanized HVAC Supply Duct & Fire Sprinkler Pipes
+        self._draw_box(3.6, 2.78, 0.0, 0.75, 0.36, 11.0, (0.75, 0.78, 0.84))
+        for rz_d in range(-5, 6):
+            self._draw_box(3.6, 2.78, float(rz_d), 0.77, 0.38, 0.03, (0.55, 0.58, 0.65))
+
+        glLineWidth(2.5)
+        glColor3f(0.85, 0.15, 0.15)
+        glBegin(GL_LINES)
+        glVertex3f(-5.5, 2.90, 0.5); glVertex3f(5.5, 2.90, 0.5)
+        glVertex3f(-5.5, 2.90, -3.0); glVertex3f(5.5, 2.90, -3.0)
+        glEnd()
+        for sp_x in [-4.0, -2.0, 0.0, 2.0, 4.0]:
+            for sp_z in [0.5, -3.0]:
+                self._draw_box(sp_x, 2.86, sp_z, 0.03, 0.08, 0.03, (0.85, 0.15, 0.15))
+                self._draw_box(sp_x, 2.81, sp_z, 0.04, 0.02, 0.04, (0.85, 0.75, 0.20))
+
+        # 13. Safety Floor Markings (Yellow/Black Hazard Chevrons in Front of CRACs)
+        for crac_z in [-2.0, 1.8]:
+            for chv in range(6):
+                cz = crac_z - 0.50 + chv * 0.20
+                col = (0.92, 0.82, 0.08) if chv % 2 == 0 else (0.12, 0.13, 0.16)
+                glBegin(GL_QUADS)
+                glColor3f(*col)
+                glVertex3f(4.20, 0.002, cz - 0.08)
+                glVertex3f(4.70, 0.002, cz - 0.08)
+                glVertex3f(4.70, 0.002, cz + 0.08)
+                glVertex3f(4.20, 0.002, cz + 0.08)
+                glEnd()
+
     def _render_room(self, now):
         if self.room_display_list is None:
             self._init_display_lists()
@@ -308,6 +482,16 @@ class Renderer3D:
         rfid_blink = int(now * 2) % 2 == 0
         rfid_color = (0.1, 0.95, 0.2) if rfid_blink else (0.05, 0.3, 0.1)
         self._draw_box(-5.96, 1.40, 1.5, 0.02, 0.015, 0.04, rfid_color)
+
+        # 3. CRAC Units Live LED Status & Climate Temperature Indicators
+        for crac_z in [-2.0, 1.8]:
+            crac_pulse = 0.85 + 0.15 * math.sin(now * 3.0 + crac_z)
+            self._draw_box(4.74, 1.95, crac_z + 0.12, 0.01, 0.012, 0.012, (0.0, 0.98 * crac_pulse, 0.35 * crac_pulse))
+            self._draw_box(4.74, 1.95, crac_z - 0.12, 0.01, 0.012, 0.012, (0.0, 0.80 * crac_pulse, 1.0 * crac_pulse))
+
+        # 4. Emergency EXIT Sign Soft Green Ambient Glow
+        exit_pulse = 0.92 + 0.08 * math.sin(now * 1.5)
+        self._draw_box(5.83, 2.50, -4.2, 0.01, 0.12, 0.36, (0.15 * exit_pulse, 0.98 * exit_pulse, 0.35 * exit_pulse))
 
     def _compile_server_racks_static_list(self):
         w = self.rack_width   # 0.60m
@@ -372,7 +556,7 @@ class Renderer3D:
 
             self._draw_box(-hw + stile_w/2, hh, door_front_z, stile_w, h - 0.06, 0.016, (0.13, 0.14, 0.17))
             self._draw_box(hw - stile_w/2, hh, door_front_z, stile_w, h - 0.06, 0.016, (0.13, 0.14, 0.17))
-            self._draw_box(0.0, 0.045, door_front_z, w, 0.065, 0.018, (0.15, 0.16, 0.19))
+            self._draw_box(0.0, 0.026, door_front_z, w, 0.050, 0.018, (0.15, 0.16, 0.19))
 
             for hy in [0.45, 1.10, 1.75]:
                 self._draw_box(-hw + 0.006, hy, door_front_z + 0.008, 0.014, 0.055, 0.014, (0.65, 0.68, 0.74))
@@ -444,30 +628,176 @@ class Renderer3D:
                     self._draw_box(dx + 0.015 * d_sign, fy, duct_z + 0.015, 0.016, 0.008, 0.005, (0.24, 0.26, 0.30))
                     self._draw_box(dx, fy, duct_z, duct_w - 0.008, 0.012, 0.028, (0.05, 0.05, 0.06))
 
-            # 8. DUAL REDUNDANT 0U VERTICAL REAR PDUS (FEED A & FEED B)
+            # 8. DUAL REDUNDANT 0U VERTICAL REAR PDUS, OVERHEAD POWER WHIPS & REAR CABLING
             pdu_z = -hd + 0.058
-            pdu_w = 0.040
-            pdu_h = h - 0.22
+            pdu_w = 0.046
+            pdu_h = h - 0.16
 
-            # PDU-A (Left Rear)
-            self._draw_box(-hw + 0.075, hh, pdu_z, pdu_w, pdu_h, 0.032, (0.08, 0.08, 0.10))
-            self._draw_box(-hw + 0.075, hh, pdu_z + 0.016, 0.008, pdu_h - 0.04, 0.002, (0.0, 0.55, 0.95))
-            self._draw_box(-hw + 0.075, h - 0.20, pdu_z + 0.017, 0.028, 0.020, 0.002, (0.0, 0.95, 0.50))
-            for p_idx in range(10):
-                py = 0.25 + (p_idx / 9.0) * (h - 0.55)
-                self._draw_box(-hw + 0.075, py, pdu_z + 0.016, 0.022, 0.014, 0.002, (0.03, 0.03, 0.04))
-                self._draw_box(-hw + 0.090, py + 0.005, pdu_z + 0.017, 0.005, 0.005, 0.002, (0.1, 0.98, 0.2))
+            # Rear EIA-310-D Vertical Equipment Mounting Rails & Cable Lacing Points
+            for rx_rail in [-hw + 0.08, hw - 0.08]:
+                self._draw_box(rx_rail, hh, -hd + 0.060, 0.034, h - 0.14, 0.026, (0.28, 0.32, 0.38))
+                for u in range(1, 43, 2):
+                    uy = 0.14 + (u / 42.0) * 1.85
+                    self._draw_box(rx_rail, uy, -hd + 0.060 - 0.013, 0.007, 0.007, 0.002, (0.06, 0.07, 0.09))
 
-            # PDU-B (Right Rear)
-            self._draw_box(hw - 0.075, hh, pdu_z, pdu_w, pdu_h, 0.032, (0.08, 0.08, 0.10))
-            self._draw_box(hw - 0.075, hh, pdu_z + 0.016, 0.008, pdu_h - 0.04, 0.002, (0.90, 0.20, 0.15))
-            self._draw_box(hw - 0.075, h - 0.20, pdu_z + 0.017, 0.028, 0.020, 0.002, (0.1, 0.90, 0.60))
-            for p_idx in range(10):
-                py = 0.25 + (p_idx / 9.0) * (h - 0.55)
-                self._draw_box(hw - 0.075, py, pdu_z + 0.016, 0.022, 0.014, 0.002, (0.03, 0.03, 0.04))
-                self._draw_box(hw - 0.060, py + 0.005, pdu_z + 0.017, 0.005, 0.005, 0.002, (0.1, 0.98, 0.2))
+            # Horizontal Cable Lacing Bars across rear posts at 10U, 22U, 34U
+            for ly_u in [10, 22, 34]:
+                ly = 0.14 + (ly_u / 42.0) * 1.85
+                self._draw_box(0.0, ly, -hd + 0.046, w - 0.14, 0.014, 0.012, (0.22, 0.25, 0.30))
+                # Cable tie-wrap anchors along lacing bar
+                for tx in [-0.16, -0.08, 0.0, 0.08, 0.16]:
+                    self._draw_box(tx, ly, -hd + 0.046 - 0.006, 0.008, 0.016, 0.004, (0.10, 0.11, 0.14))
 
-            # 9. ROOF STRUCTURE, DUAL EXHAUST FANS & CABLE DROP GLANDS
+            # Solid Copper Earth Grounding Busbar along left rear post
+            busbar_x = -hw + 0.045
+            self._draw_box(busbar_x, hh, -hd + 0.048, 0.012, h - 0.24, 0.006, (0.88, 0.58, 0.24))
+            for bg in range(7):
+                bgy = 0.25 + (bg / 6.0) * (h - 0.50)
+                # Brass dual-hole grounding lug with hex bolts
+                self._draw_box(busbar_x, bgy, -hd + 0.048 - 0.004, 0.016, 0.014, 0.004, (0.82, 0.72, 0.22))
+                # Yellow/Green safety earth bonding wire jumper to rack frame
+                self._draw_box(busbar_x - 0.015, bgy, -hd + 0.040, 0.024, 0.005, 0.005, (0.85, 0.85, 0.12))
+
+            # Sub-Floor Cable Entry Cutout with Nylon Brush Grommet at base
+            self._draw_box(0.0, 0.060, -hd + 0.065, w - 0.16, 0.010, 0.065, (0.10, 0.11, 0.14))
+            self._draw_box(0.0, 0.066, -hd + 0.065, w - 0.18, 0.004, 0.055, (0.04, 0.04, 0.05))
+
+            # PDU-A (Left Rear Post - Feed A: Royal Blue Scheme)
+            pdu_a_x = -hw + 0.075
+            # Heavy Extruded Aluminum PDU Housing
+            self._draw_box(pdu_a_x, hh, pdu_z, pdu_w, pdu_h, 0.038, (0.11, 0.12, 0.15))
+            # Feed A Royal Blue Color-Code Channel Stripe
+            self._draw_box(pdu_a_x, hh, pdu_z + 0.019, 0.010, pdu_h - 0.02, 0.002, (0.0, 0.52, 0.98))
+            # Digital OLED Power Telemetry Pod at Top
+            self._draw_box(pdu_a_x, h - 0.16, pdu_z + 0.020, 0.034, 0.026, 0.004, (0.04, 0.12, 0.20))
+            self._draw_box(pdu_a_x, h - 0.16, pdu_z + 0.022, 0.028, 0.018, 0.002, (0.0, 0.95, 0.75)) # glowing telemetry
+            # Bank of 20 IEC C13 & 4 C19 Outlets with Green LEDs
+            for p_idx in range(16):
+                py = 0.22 + (p_idx / 15.0) * (h - 0.46)
+                # Recessed Outlet Bezel & Cavity
+                self._draw_box(pdu_a_x, py, pdu_z + 0.018, 0.026, 0.016, 0.003, (0.24, 0.26, 0.30))
+                self._draw_box(pdu_a_x, py, pdu_z + 0.020, 0.020, 0.012, 0.002, (0.03, 0.03, 0.04))
+                # Green Branch Circuit Breaker Active LED
+                self._draw_box(pdu_a_x + 0.014, py, pdu_z + 0.020, 0.004, 0.004, 0.002, (0.1, 0.98, 0.2))
+
+            # Overhead Heavy Industrial Power Whip for PDU-A (Drops from Yellow Cable Ladder to PDU-A)
+            # Compression Gland Fitting at PDU top
+            self._draw_box(pdu_a_x, h - 0.07, pdu_z, 0.030, 0.028, 0.030, (0.78, 0.68, 0.25))
+            # 32mm Flexible Industrial Power Conduit rising to ceiling ladder
+            self._draw_box(pdu_a_x, h + 0.18, pdu_z, 0.024, 0.48, 0.024, (0.10, 0.11, 0.14))
+            self._draw_box(pdu_a_x + 0.04, h + 0.44, pdu_z + 0.08, 0.10, 0.024, 0.16, (0.10, 0.11, 0.14))
+
+            # PDU-B (Right Rear Post - Feed B: Crimson Red Scheme)
+            pdu_b_x = hw - 0.075
+            # Heavy Extruded Aluminum PDU Housing
+            self._draw_box(pdu_b_x, hh, pdu_z, pdu_w, pdu_h, 0.038, (0.11, 0.12, 0.15))
+            # Feed B Crimson Red Color-Code Channel Stripe
+            self._draw_box(pdu_b_x, hh, pdu_z + 0.019, 0.010, pdu_h - 0.02, 0.002, (0.92, 0.18, 0.18))
+            # Digital OLED Power Telemetry Pod at Top
+            self._draw_box(pdu_b_x, h - 0.16, pdu_z + 0.020, 0.034, 0.026, 0.004, (0.16, 0.04, 0.06))
+            self._draw_box(pdu_b_x, h - 0.16, pdu_z + 0.022, 0.028, 0.018, 0.002, (0.1, 0.95, 0.45))
+            # Bank of Outlets
+            for p_idx in range(16):
+                py = 0.22 + (p_idx / 15.0) * (h - 0.46)
+                self._draw_box(pdu_b_x, py, pdu_z + 0.018, 0.026, 0.016, 0.003, (0.24, 0.26, 0.30))
+                self._draw_box(pdu_b_x, py, pdu_z + 0.020, 0.020, 0.012, 0.002, (0.03, 0.03, 0.04))
+                self._draw_box(pdu_b_x - 0.014, py, pdu_z + 0.020, 0.004, 0.004, 0.002, (0.1, 0.98, 0.2))
+
+            # Overhead Heavy Industrial Power Whip for PDU-B
+            self._draw_box(pdu_b_x, h - 0.07, pdu_z, 0.030, 0.028, 0.030, (0.78, 0.68, 0.25))
+            self._draw_box(pdu_b_x, h + 0.18, pdu_z, 0.024, 0.48, 0.024, (0.10, 0.11, 0.14))
+            self._draw_box(pdu_b_x - 0.04, h + 0.44, pdu_z + 0.08, 0.10, 0.024, 0.16, (0.10, 0.11, 0.14))
+
+            # Rear High-Density Vertical Cable Bundles with Hook-and-Loop (Velcro) Straps
+            # Left Vertical Cable Harness (Feed A power cords & network trunks)
+            bundle_a_x = -hw + 0.032
+            bundle_z = -hd + 0.042
+            self._draw_box(bundle_a_x, hh, bundle_z, 0.028, h - 0.18, 0.028, (0.10, 0.11, 0.13))
+            self._draw_box(bundle_a_x, hh, bundle_z - 0.008, 0.018, h - 0.20, 0.014, (0.0, 0.45, 0.90))
+            for v_idx in range(9):
+                vy = 0.25 + (v_idx / 8.0) * (h - 0.50)
+                # Royal Blue Velcro Tie Strap cinched around bundle
+                self._draw_box(bundle_a_x, vy, bundle_z, 0.034, 0.016, 0.034, (0.08, 0.42, 0.95))
+
+            # Right Vertical Cable Harness (Feed B power cords & storage trunks)
+            bundle_b_x = hw - 0.032
+            self._draw_box(bundle_b_x, hh, bundle_z, 0.028, h - 0.18, 0.028, (0.10, 0.11, 0.13))
+            self._draw_box(bundle_b_x, hh, bundle_z - 0.008, 0.018, h - 0.20, 0.014, (0.85, 0.20, 0.20))
+            for v_idx in range(9):
+                vy = 0.25 + (v_idx / 8.0) * (h - 0.50)
+            # 9. ENTERPRISE UNDER-RACK SMART-UPS POWER SYSTEM (BELOW SLOT U1 IN BASE PLINTH - ZERO OVERLAP)
+            ups_y = 0.088
+            ups_h = 0.070
+            ups_w = 0.442
+            ups_d = 0.660
+
+            # Main Heavy-Duty Steel Chassis Enclosure resting on lower plinth base
+            self._draw_box(0.0, ups_y, 0.0, ups_w, ups_h, ups_d, (0.13, 0.14, 0.17))
+            # Heavy-Duty Rackmount Ear Brackets (19-inch EIA standard) & Screws
+            self._draw_box(-hw + 0.078, ups_y, 0.342, 0.022, ups_h, 0.006, (0.42, 0.45, 0.50))
+            self._draw_box( hw - 0.078, ups_y, 0.342, 0.022, ups_h, 0.006, (0.42, 0.45, 0.50))
+            # Stainless Hex Screws (2 per ear)
+            for ear_x in [-hw + 0.078, hw - 0.078]:
+                self._draw_box(ear_x, ups_y + 0.022, 0.346, 0.008, 0.008, 0.003, (0.85, 0.88, 0.92))
+                self._draw_box(ear_x, ups_y - 0.022, 0.346, 0.008, 0.008, 0.003, (0.85, 0.88, 0.92))
+
+            # A. FRONT PANEL (Z = +0.344)
+            # Left: Hot-Swap Battery Pack Cartridge Module
+            self._draw_box(-0.105, ups_y, 0.348, 0.200, ups_h - 0.008, 0.005, (0.16, 0.18, 0.22))
+            # Recessed Finger Pull Handle
+            self._draw_box(-0.105, ups_y, 0.351, 0.080, 0.014, 0.003, (0.07, 0.08, 0.10))
+            # Battery Pack Identity Badge
+            self._draw_box(-0.155, ups_y + 0.020, 0.351, 0.050, 0.010, 0.002, (0.28, 0.32, 0.38))
+
+            # Right: UPS Controller, Intelligence Module & LCD
+            self._draw_box(0.105, ups_y, 0.348, 0.200, ups_h - 0.008, 0.005, (0.18, 0.20, 0.24))
+            # Backlit Cyan/Blue Diagnostic LCD Telemetry Screen
+            self._draw_box(0.105, ups_y + 0.012, 0.351, 0.095, 0.024, 0.003, (0.04, 0.20, 0.36))
+            self._draw_box(0.105, ups_y + 0.012, 0.353, 0.085, 0.018, 0.002, (0.06, 0.85, 0.95)) # glowing telemetry
+            # 5-Bar LED Battery Capacity Gauge (Green)
+            for b in range(5):
+                self._draw_box(0.075 + b * 0.014, ups_y - 0.007, 0.352, 0.010, 0.004, 0.002, (0.1, 0.98, 0.2))
+            # 5-Bar LED Load Meter Gauge (Green & Amber)
+            for l_idx in range(5):
+                l_col = (0.1, 0.98, 0.2) if l_idx < 4 else (1.0, 0.65, 0.05)
+                self._draw_box(0.075 + l_idx * 0.014, ups_y - 0.016, 0.352, 0.010, 0.004, 0.002, l_col)
+            # Status Indicator Micro-LEDs (ONLINE = Green, BATT = Amber, BYPASS = Amber, FAULT = Red)
+            self._draw_box(0.170, ups_y + 0.020, 0.352, 0.005, 0.005, 0.002, (0.1, 0.98, 0.2))
+            self._draw_box(0.184, ups_y + 0.020, 0.352, 0.005, 0.005, 0.002, (0.20, 0.14, 0.05))
+            self._draw_box(0.170, ups_y + 0.009, 0.352, 0.005, 0.005, 0.002, (0.20, 0.14, 0.05))
+            self._draw_box(0.184, ups_y + 0.009, 0.352, 0.005, 0.005, 0.002, (0.25, 0.05, 0.05))
+            # Round Power ON / Test Button
+            self._draw_box(0.178, ups_y - 0.010, 0.352, 0.012, 0.012, 0.003, (0.12, 0.85, 0.30))
+            # Vivid Schneider Green Brand Accent Stripe
+            self._draw_box(0.0, ups_y - 0.028, 0.350, 0.420, 0.004, 0.002, (0.0, 0.70, 0.35))
+
+            # B. REAR PANEL (Z = -0.344)
+            # Rear Metal Faceplate
+            self._draw_box(0.0, ups_y, -0.344, 0.442, ups_h, 0.006, (0.14, 0.15, 0.18))
+            # Main AC Utility Mains Input Power Gland (Mains Feed)
+            self._draw_box(-0.150, ups_y - 0.010, -0.348, 0.028, 0.028, 0.016, (0.75, 0.65, 0.22))
+            # Heavy 22mm Black Rubber Power Supply Cable dropping into floor cutout
+            cable_h = max(0.01, ups_y - 0.010)
+            self._draw_box(-0.150, cable_h / 2.0, -0.348, 0.020, cable_h, 0.020, (0.08, 0.09, 0.11))
+            # Heavy Output Feeds connecting UPS directly to PDU-A (Blue) and PDU-B (Red)
+            pdu_bottom = 0.20
+            conduit_h = max(0.02, pdu_bottom - (ups_y + 0.015))
+            conduit_y = (ups_y + 0.015) + conduit_h / 2.0
+            self._draw_box(-hw + 0.075, conduit_y, pdu_z, 0.020, conduit_h, 0.020, (0.0, 0.48, 0.95))
+            self._draw_box( hw - 0.075, conduit_y, pdu_z, 0.020, conduit_h, 0.020, (0.88, 0.15, 0.15))
+            # Bank of 6 IEC C13 Output Receptacles
+            for r_idx in range(6):
+                rx_out = -0.060 + r_idx * 0.024
+                self._draw_box(rx_out, ups_y + 0.012, -0.348, 0.018, 0.014, 0.003, (0.04, 0.04, 0.05))
+            # SmartSlot Network Management Card (NMC 3) with RJ45
+            self._draw_box(0.140, ups_y + 0.014, -0.348, 0.026, 0.018, 0.004, (0.45, 0.48, 0.52))
+            self._draw_box(0.140, ups_y + 0.014, -0.350, 0.018, 0.012, 0.002, (0.05, 0.08, 0.12))
+            self._draw_box(0.140, ups_y + 0.024, -0.349, 0.005, 0.005, 0.002, (0.1, 0.98, 0.2))
+            # External Battery High-Current DC Connector
+            self._draw_box(0.020, ups_y - 0.016, -0.348, 0.038, 0.022, 0.014, (0.15, 0.35, 0.85))
+
+
+            # 10. ROOF STRUCTURE, DUAL EXHAUST FANS & CABLE DROP GLANDS
             roof_y = h - 0.025
             self._draw_box(0.0, roof_y, 0.0, w, 0.05, d, (0.08, 0.09, 0.11))
             self._draw_box(0.0, h + 0.002, 0.0, w - 0.02, 0.004, d - 0.02, (0.12, 0.13, 0.16))
@@ -555,16 +885,26 @@ class Renderer3D:
             for lz in [-0.32, 0.32]:
                 self._draw_box(lx, 0.375, lz, 0.04, 0.75, 0.04, (0.22, 0.25, 0.30))
 
-        # Seamless Wide Executive Leather Desk Pad under both laptops
-        self._draw_box(0.0, 0.771, 0.0, 1.18, 0.002, 0.44, (0.13, 0.14, 0.17))
-        self._draw_box(0.0, 0.772, 0.0, 1.16, 0.001, 0.42, (0.18, 0.20, 0.24))
-        self._draw_box(0.0, 0.7725, 0.0, 1.14, 0.001, 0.40, (0.12, 0.13, 0.15))
-
-        # Desk Center Accessories: Datacenter Engineering Notepad with Slate Clip & Pen
-        self._draw_box(0.0, 0.775, 0.16, 0.18, 0.004, 0.14, (0.25, 0.26, 0.30))
-        self._draw_box(0.0, 0.778, 0.16, 0.16, 0.002, 0.12, (0.94, 0.94, 0.94))
-        self._draw_box(0.0, 0.780, 0.22, 0.04, 0.003, 0.015, (0.45, 0.48, 0.52))
-        self._draw_box(0.10, 0.778, 0.16, 0.008, 0.006, 0.12, (0.1, 0.45, 0.85))
+        # Ergonomic High-Back Mesh Office Chair (on floor in front of workbench)
+        chair_z = 0.55
+        # 5-Star Caster Wheel Base
+        self._draw_box(0.0, 0.06, chair_z, 0.52, 0.03, 0.52, (0.15, 0.16, 0.19))
+        for star_ang in range(5):
+            sa = star_ang * 2.0 * math.pi / 5.0
+            cx = math.cos(sa) * 0.24
+            cz = chair_z + math.sin(sa) * 0.24
+            self._draw_box(cx, 0.03, cz, 0.04, 0.05, 0.04, (0.08, 0.09, 0.11))
+        # Chrome Hydraulic Cylinder
+        self._draw_box(0.0, 0.25, chair_z, 0.05, 0.36, 0.05, (0.75, 0.78, 0.82))
+        # Contoured Seat Cushion
+        self._draw_box(0.0, 0.46, chair_z, 0.46, 0.07, 0.44, (0.18, 0.20, 0.24))
+        # Mesh Ergonomic Backrest with Lumbar Support
+        self._draw_box(0.0, 0.78, chair_z + 0.19, 0.42, 0.56, 0.04, (0.12, 0.14, 0.17))
+        self._draw_box(0.0, 0.65, chair_z + 0.17, 0.34, 0.12, 0.03, (0.24, 0.26, 0.30))
+        # Adjustable Armrests
+        for arm_x in [-0.25, 0.25]:
+            self._draw_box(arm_x, 0.58, chair_z, 0.03, 0.18, 0.04, (0.20, 0.22, 0.26))
+            self._draw_box(arm_x, 0.68, chair_z - 0.02, 0.06, 0.03, 0.22, (0.10, 0.11, 0.13))
 
         glPopMatrix()
 
@@ -573,7 +913,14 @@ class Renderer3D:
             self._init_display_lists()
         glCallList(self.workbench_display_list)
 
-    def _render_devices(self, devices, current_time):
+    def _render_devices(self, devices, current_time, camera=None):
+        cam_z = getattr(camera, "z", getattr(camera, "base_eye_z", 0.0)) if camera else 0.0
+        # Datacenter racks are centered at z = -1.5 (front: -1.10, rear: -1.90)
+        # In front of racks (cold aisle / main menu): cam_z >= -1.65 -> front visible
+        # Behind racks (hot aisle): cam_z <= -1.35 -> rear visible
+        is_front_visible = cam_z >= -1.65
+        is_rear_visible = cam_z <= -1.35
+
         for dev in devices:
             glPushMatrix()
             glTranslatef(dev.pos_x, dev.pos_y, dev.pos_z)
@@ -582,24 +929,138 @@ class Renderer3D:
             if dev.device_type == "laptop":
                 self._render_laptop(dev, current_time)
             else:
-                # Metal Enclosure Body (Common to 19-inch rack appliances)
-                body_color = (0.16, 0.18, 0.22)
-                self._draw_box(0.0, 0.0, 0.0, dev.width, dev.height, dev.depth, body_color)
+                # Compile Front static display list if not present
+                if getattr(dev, "_dl_front", None) is None:
+                    dev._dl_front = glGenLists(1)
+                    self._device_display_lists.add(dev._dl_front)
+                    glNewList(dev._dl_front, GL_COMPILE)
+                    self._compile_device_front(dev)
+                    glEndList()
 
-                if dev.device_type == "switch":
-                    self._render_switch(dev, current_time)
-                elif dev.device_type == "router":
-                    self._render_router(dev, current_time)
-                elif dev.device_type in ("isp_gateway", "isp") or (dev.device_type == "server" and "isp" in dev.hostname.lower()):
-                    self._render_isp_gateway(dev, current_time)
-                elif dev.device_type == "server":
-                    self._render_server(dev, current_time)
-                elif dev.device_type == "firewall":
-                    self._render_firewall(dev, current_time)
-                else:
-                    self._render_generic_device(dev, current_time)
+                # Compile Rear static display list if in a server rack
+                if getattr(dev, "rack_id", 0) in (1, 2, 3):
+                    if getattr(dev, "_dl_rear", None) is None:
+                        dev._dl_rear = glGenLists(1)
+                        self._device_display_lists.add(dev._dl_rear)
+                        glNewList(dev._dl_rear, GL_COMPILE)
+                        self._compile_device_rear(dev)
+                        glEndList()
+
+                # Render Front if visible
+                if is_front_visible:
+                    glCallList(dev._dl_front)
+                    self._render_device_dynamic_front(dev, current_time)
+
+                # Render Rear if visible
+                if is_rear_visible and getattr(dev, "rack_id", 0) in (1, 2, 3):
+                    glCallList(dev._dl_rear)
+                    self._render_device_dynamic_rear(dev, current_time)
 
             glPopMatrix()
+
+    def _compile_device_front(self, dev):
+        """Compiles static chassis, bezels, ears, ports, and heat sinks into an OpenGL display list."""
+        body_color = (0.16, 0.18, 0.22)
+        self._draw_box(0.0, 0.0, 0.0, dev.width, dev.height, dev.depth, body_color)
+
+        if dev.device_type == "switch":
+            self._render_switch(dev, 0.0)
+        elif dev.device_type == "router":
+            self._render_router(dev, 0.0)
+        elif dev.device_type in ("isp_gateway", "isp") or (dev.device_type == "server" and "isp" in dev.hostname.lower()):
+            self._render_isp_gateway(dev, 0.0)
+        elif dev.device_type == "server":
+            self._render_server(dev, 0.0)
+        elif dev.device_type == "firewall":
+            self._render_firewall(dev, 0.0)
+        else:
+            self._render_generic_device(dev, 0.0)
+
+    def _compile_device_rear(self, dev):
+        """Compiles static rear backplate, dual hot-swap PSUs, and 3D power cords into an OpenGL display list."""
+        self._render_device_rear(dev, 0.0)
+
+    def _render_device_dynamic_front(self, dev, now):
+        """Draws dynamic blinking port LEDs, link states, and activity beacons with minimal vertex overhead."""
+        if dev.device_type == "switch":
+            for idx, port in enumerate(dev.ports.values()):
+                if port.port_type == "CONSOLE":
+                    continue
+                px, py, pz = dev.get_port_local_pos(port.name, port.port_index)
+                led = port.get_led_state(now)
+                if led == LEDState.GREEN:
+                    link_c = (0.1, 0.98, 0.2)
+                elif led == LEDState.BLINK_GREEN:
+                    link_c = (0.4, 1.0, 0.5)
+                elif led == LEDState.AMBER:
+                    link_c = (1.0, 0.65, 0.05)
+                else:
+                    link_c = (0.08, 0.12, 0.08)
+                self._draw_box(px - 0.005, py + 0.016, pz + 0.0035, 0.006, 0.006, 0.002, link_c)
+
+                act_blink = (led in (LEDState.GREEN, LEDState.BLINK_GREEN)) and (int(now * 14 + idx) % 2 == 0)
+                act_c = (0.2, 0.95, 0.3) if act_blink else (0.06, 0.10, 0.06)
+                self._draw_box(px + 0.005, py + 0.016, pz + 0.0035, 0.006, 0.006, 0.002, act_c)
+
+        elif dev.device_type == "router":
+            data_ports = [p for p in dev.ports.values() if p.port_type != "CONSOLE"]
+            for idx, port in enumerate(data_ports):
+                px, py, pz = dev.get_port_local_pos(port.name, port.port_index)
+                led = port.get_led_state(now)
+                if led == LEDState.GREEN:
+                    link_c = (0.1, 0.98, 0.2)
+                elif led == LEDState.BLINK_GREEN:
+                    link_c = (0.4, 1.0, 0.5)
+                elif led == LEDState.AMBER:
+                    link_c = (1.0, 0.65, 0.05)
+                else:
+                    link_c = (0.08, 0.12, 0.08)
+                self._draw_box(px - 0.004, py - 0.014, pz + 0.0035, 0.005, 0.005, 0.002, link_c)
+
+                act_blink = (led in (LEDState.GREEN, LEDState.BLINK_GREEN)) and (int(now * 14 + idx) % 2 == 0)
+                act_c = (0.2, 0.95, 0.3) if act_blink else (0.06, 0.10, 0.06)
+                self._draw_box(px + 0.004, py - 0.014, pz + 0.0035, 0.005, 0.005, 0.002, act_c)
+
+        elif dev.device_type == "server":
+            hh = dev.height / 2.0
+            front_z = dev.depth / 2.0 + 0.003
+            power_col = (0.1, 0.98, 0.2) if dev.is_powered else (0.08, 0.12, 0.08)
+            self._draw_box(-0.19, hh - 0.012, front_z + 0.0035, 0.006, 0.006, 0.002, power_col)
+            hdd_blink = dev.is_powered and (int(now * 9) % 2 == 0)
+            hdd_col = (0.2, 0.85, 0.98) if hdd_blink else (0.06, 0.14, 0.20)
+            self._draw_box(-0.178, hh - 0.012, front_z + 0.0035, 0.005, 0.005, 0.002, hdd_col)
+
+        elif dev.device_type == "firewall":
+            data_ports = [p for p in dev.ports.values() if p.port_type != "CONSOLE" and not p.name.startswith("m")]
+            for idx, port in enumerate(data_ports):
+                px, py, pz = dev.get_port_local_pos(port.name, port.port_index)
+                led = port.get_led_state(now)
+                link_c = (0.1, 0.98, 0.2) if led == LEDState.GREEN else ((0.4, 1.0, 0.5) if led == LEDState.BLINK_GREEN else ((1.0, 0.65, 0.05) if led == LEDState.AMBER else (0.08, 0.12, 0.08)))
+                self._draw_box(px - 0.005, py - 0.014, pz + 0.0035, 0.005, 0.005, 0.002, link_c)
+
+                act_blink = (led in (LEDState.GREEN, LEDState.BLINK_GREEN)) and (int(now * 14 + idx) % 2 == 0)
+                act_c = (0.2, 0.95, 0.3) if act_blink else (0.06, 0.10, 0.06)
+                self._draw_box(px + 0.005, py - 0.014, pz + 0.0035, 0.005, 0.005, 0.002, act_c)
+
+        elif dev.device_type in ("isp_gateway", "isp") or (dev.device_type == "server" and "isp" in dev.hostname.lower()):
+            front_z = dev.depth / 2.0 + 0.003
+            eth_port = dev.ports.get("eth0")
+            is_carrier_up = (eth_port and eth_port.is_link_up) or dev.is_powered
+            carrier_blink = is_carrier_up and (int(now * 4) % 2 == 0)
+            c_col = (0.1, 0.98, 0.2) if carrier_blink else (0.06, 0.35, 0.12)
+            self._draw_box(-0.177, 0.006, front_z + 0.004, 0.005, 0.005, 0.002, c_col)
+
+    def _render_device_dynamic_rear(self, dev, now):
+        """Draws dynamic rear iDRAC and server UID beacon blink LEDs."""
+        if dev.device_type == "server":
+            back_z = -dev.depth / 2.0
+            mgmt_blink = int(now * 6) % 2 == 0
+            mgmt_col = (0.2, 0.95, 0.3) if mgmt_blink else (0.08, 0.12, 0.08)
+            self._draw_box(-0.048, 0.022, back_z - 0.006, 0.005, 0.005, 0.002, mgmt_col)
+
+            uid_blink = int(now * 2) % 2 == 0
+            uid_col = (0.0, 0.75, 1.0) if uid_blink else (0.02, 0.25, 0.40)
+            self._draw_box(0.045, 0.015, back_z - 0.006, 0.008, 0.008, 0.002, uid_col)
 
     def _compile_laptop_static_list(self, is_windows):
         # 1. Base Chassis Body (0.36m width x 0.26m depth x 0.016m height)
@@ -1153,47 +1614,483 @@ class Renderer3D:
             self._draw_box(px, py, pz, 0.022, 0.016, 0.004, (0.40, 0.44, 0.48))
             self._draw_box(px, py, pz + 0.002, 0.016, 0.012, 0.002, (0.05, 0.08, 0.12))
 
-    def _render_cables(self, cables):
-        """Renders 3D cables with catenary gravity sag and snagless rubber boots."""
+    def _draw_curved_cord(self, p0, p1, p2, p3, radius, color, num_segments=10):
+        """Draws a smooth 3D curved electrical cord with Gouraud shading."""
+        pts = []
+        for i in range(num_segments + 1):
+            t = i / float(num_segments)
+            u = 1.0 - t
+            x = u*u*u*p0[0] + 3*u*u*t*p1[0] + 3*u*t*t*p2[0] + t*t*t*p3[0]
+            y = u*u*u*p0[1] + 3*u*u*t*p1[1] + 3*u*t*t*p2[1] + t*t*t*p3[1]
+            z = u*u*u*p0[2] + 3*u*u*t*p1[2] + 3*u*t*t*p2[2] + t*t*t*p3[2]
+            pts.append((x, y, z))
+
+        lx, ly, lz = 0.0, 0.88, 0.47
+        NUM_SIDES = 6
+        cos_tab = (1.0, 0.5, -0.5, -1.0, -0.5, 0.5)
+        sin_tab = (0.0, 0.866025, 0.866025, 0.0, -0.866025, -0.866025)
+
+        rings = []
+        prev_n = (0.0, 1.0, 0.0)
+        for i in range(len(pts)):
+            if i == 0:
+                tx, ty, tz = pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]
+            elif i == len(pts) - 1:
+                tx, ty, tz = pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1], pts[i][2] - pts[i-1][2]
+            else:
+                tx, ty, tz = pts[i+1][0] - pts[i-1][0], pts[i+1][1] - pts[i-1][1], pts[i+1][2] - pts[i-1][2]
+            tlen = math.sqrt(tx*tx + ty*ty + tz*tz)
+            if tlen > 1e-6:
+                tx, ty, tz = tx/tlen, ty/tlen, tz/tlen
+            else:
+                tx, ty, tz = 0.0, 0.0, 1.0
+
+            dot = prev_n[0]*tx + prev_n[1]*ty + prev_n[2]*tz
+            nx, ny, nz = prev_n[0] - dot*tx, prev_n[1] - dot*ty, prev_n[2] - dot*tz
+            nlen = math.sqrt(nx*nx + ny*ny + nz*nz)
+            if nlen > 1e-6:
+                nx, ny, nz = nx/nlen, ny/nlen, nz/nlen
+            else:
+                nx, ny, nz = 0.0, 1.0, 0.0
+            prev_n = (nx, ny, nz)
+
+            bx = ty*nz - tz*ny
+            by = tz*nx - tx*nz
+            bz = tx*ny - ty*nx
+
+            ring_verts = []
+            ring_colors = []
+            px, py, pz = pts[i]
+            for s in range(NUM_SIDES):
+                c_val, s_val = cos_tab[s], sin_tab[s]
+                vx = px + radius * (c_val * nx + s_val * bx)
+                vy = py + radius * (c_val * ny + s_val * by)
+                vz = pz + radius * (c_val * nz + s_val * bz)
+                norm_x = c_val * nx + s_val * bx
+                norm_y = c_val * ny + s_val * by
+                norm_z = c_val * nz + s_val * bz
+                dot_l = max(0.0, norm_x*lx + norm_y*ly + norm_z*lz)
+                shade = 0.40 + 0.60 * dot_l
+                ring_verts.append((vx, vy, vz))
+                ring_colors.append((color[0]*shade, color[1]*shade, color[2]*shade))
+            rings.append((ring_verts, ring_colors))
+
+        glBegin(GL_QUADS)
+        for i in range(len(rings) - 1):
+            v0, c0 = rings[i]
+            v1, c1 = rings[i+1]
+            for s in range(NUM_SIDES):
+                s_next = (s + 1) % NUM_SIDES
+                glColor3f(*c0[s])
+                glVertex3f(*v0[s])
+                glColor3f(*c1[s])
+                glVertex3f(*v1[s])
+                glColor3f(*c1[s_next])
+                glVertex3f(*v1[s_next])
+                glColor3f(*c0[s_next])
+                glVertex3f(*v0[s_next])
+        glEnd()
+
+    def _render_device_rear(self, dev, now):
+        """
+        Renders authentic rear panel details, dual hot-swap PSUs, cooling fans,
+        management ports, and real 3D power cords (Feed A & Feed B) to the rack PDUs.
+        """
+        hw = dev.width / 2.0
+        hh = dev.height / 2.0
+        back_z = -dev.depth / 2.0
+
+        # 1. Rear Metal Backplate (Galvanized / Charcoal Anodized Steel)
+        self._draw_box(0.0, 0.0, back_z - 0.001, dev.width - 0.03, dev.height - 0.004, 0.002, (0.13, 0.14, 0.17))
+        # Top and Bottom Chassis Flange Lips
+        self._draw_box(0.0, hh - 0.002, back_z - 0.002, dev.width - 0.02, 0.003, 0.003, (0.28, 0.30, 0.35))
+        self._draw_box(0.0, -hh + 0.002, back_z - 0.002, dev.width - 0.02, 0.003, 0.003, (0.28, 0.30, 0.35))
+
+        # 2. Chassis Safety Earth Grounding Lug on Corner
+        lug_x = -hw + 0.024
+        lug_y = -hh + 0.010
+        self._draw_box(lug_x, lug_y, back_z - 0.003, 0.014, 0.010, 0.003, (0.88, 0.58, 0.22))
+        self._draw_box(lug_x - 0.003, lug_y, back_z - 0.005, 0.004, 0.004, 0.002, (0.75, 0.78, 0.82))
+        self._draw_box(lug_x + 0.003, lug_y, back_z - 0.005, 0.004, 0.004, 0.002, (0.75, 0.78, 0.82))
+        # Yellow/Green grounding jumper wire to rack frame
+        self._draw_box(lug_x - 0.018, lug_y, back_z - 0.003, 0.024, 0.004, 0.004, (0.85, 0.85, 0.12))
+
+        # 3. Dual Redundant Hot-Swappable Power Supplies (PSU 1 on Left, PSU 2 on Right)
+        for side, psu_x, feed_col, tag in [(-1, -0.14, (0.0, 0.52, 0.98), "A"), (1, 0.14, (0.92, 0.18, 0.18), "B")]:
+            # PSU Outer Housing Casing
+            self._draw_box(psu_x, 0.0, back_z - 0.004, 0.076, dev.height - 0.008, 0.006, (0.22, 0.25, 0.29))
+            self._draw_box(psu_x, 0.0, back_z - 0.007, 0.072, dev.height - 0.012, 0.002, (0.16, 0.18, 0.21))
+
+            # PSU Exhaust Cooling Fan Grill
+            fan_x = psu_x - 0.018 * side
+            self._draw_box(fan_x, 0.0, back_z - 0.008, 0.026, dev.height - 0.014, 0.002, (0.07, 0.08, 0.10))
+            self._draw_box(fan_x, 0.0, back_z - 0.009, 0.010, 0.010, 0.002, (0.45, 0.48, 0.52))
+
+            # IEC C14 Power Inlet Socket
+            sock_x = psu_x + 0.015 * side
+            self._draw_box(sock_x, 0.004, back_z - 0.007, 0.024, 0.018, 0.004, (0.04, 0.04, 0.05))
+            self._draw_box(sock_x, 0.004, back_z - 0.009, 0.018, 0.013, 0.002, (0.02, 0.02, 0.03))
+            # 3 Brass Pins inside socket
+            self._draw_box(sock_x, 0.004, back_z - 0.008, 0.012, 0.003, 0.003, (0.88, 0.72, 0.20))
+            # Metal wire retention bail clip
+            self._draw_box(sock_x, -0.008, back_z - 0.008, 0.020, 0.003, 0.004, (0.75, 0.78, 0.82))
+
+            # PSU Status LED: Solid Glowing Green (AC OK status)
+            self._draw_box(psu_x + 0.002 * side, hh - 0.010, back_z - 0.008, 0.005, 0.005, 0.002, (0.1, 0.98, 0.2))
+
+            # Hot-Swap Quick-Release Ejector Handle (Red or Charcoal Latch)
+            handle_x = psu_x + 0.033 * side
+            self._draw_box(handle_x, 0.0, back_z - 0.010, 0.007, dev.height - 0.014, 0.008, (0.85, 0.18, 0.18))
+            self._draw_box(handle_x, 0.0, back_z - 0.014, 0.005, 0.016, 0.004, (0.10, 0.11, 0.13))
+
+            # AC Power Rocker Switch (I / O)
+            sw_x = psu_x - 0.030 * side
+            self._draw_box(sw_x, -hh + 0.012, back_z - 0.008, 0.007, 0.011, 0.003, (0.12, 0.13, 0.15))
+            self._draw_box(sw_x, -hh + 0.012, back_z - 0.009, 0.005, 0.007, 0.002, (0.85, 0.88, 0.92))
+
+        # 4. Central Rear I/O, Fan Modules & Expansion Slots
+        if dev.device_type == "switch":
+            # Cisco Catalyst: Dual StackWise-480 high-speed stacking ports
+            for st_idx, sx in enumerate([-0.045, 0.035]):
+                self._draw_box(sx, 0.006, back_z - 0.004, 0.030, 0.016, 0.004, (0.45, 0.48, 0.52))
+                self._draw_box(sx, 0.006, back_z - 0.006, 0.024, 0.011, 0.002, (0.08, 0.10, 0.14))
+                self._draw_box(sx - 0.018, 0.006, back_z - 0.007, 0.006, 0.006, 0.004, (0.82, 0.72, 0.22))
+                self._draw_box(sx + 0.018, 0.006, back_z - 0.007, 0.006, 0.006, 0.004, (0.82, 0.72, 0.22))
+            # StackPower Power-Sharing bus connector
+            self._draw_box(-0.005, -0.008, back_z - 0.004, 0.024, 0.012, 0.003, (0.10, 0.12, 0.16))
+            # OOB Gigabit Ethernet Management Port (RJ45 with link LED)
+            self._draw_box(0.075, 0.004, back_z - 0.004, 0.020, 0.016, 0.003, (0.45, 0.48, 0.52))
+            self._draw_box(0.075, 0.004, back_z - 0.006, 0.015, 0.012, 0.002, (0.04, 0.04, 0.05))
+            self._draw_box(0.075, 0.014, back_z - 0.005, 0.005, 0.005, 0.002, (0.1, 0.98, 0.2))
+
+        elif dev.device_type == "server":
+            # Enterprise Server Rear: Dedicated iDRAC/iLO Remote Management Port (Orange bezel)
+            self._draw_box(-0.048, 0.012, back_z - 0.004, 0.022, 0.018, 0.003, (0.95, 0.45, 0.08))
+            self._draw_box(-0.048, 0.012, back_z - 0.006, 0.016, 0.013, 0.002, (0.04, 0.04, 0.05))
+            mgmt_blink = int(now * 6) % 2 == 0
+            mgmt_col = (0.2, 0.95, 0.3) if mgmt_blink else (0.08, 0.12, 0.08)
+            self._draw_box(-0.048, 0.022, back_z - 0.005, 0.005, 0.005, 0.002, mgmt_col)
+
+            # Blue VGA DB15 connector
+            self._draw_box(-0.016, 0.012, back_z - 0.004, 0.024, 0.014, 0.003, (0.15, 0.35, 0.85))
+            # Dual USB 3.0 Ports (Blue interior)
+            self._draw_box(0.014, 0.012, back_z - 0.004, 0.018, 0.014, 0.003, (0.10, 0.55, 0.95))
+
+            # 4 PCIe Expansion Slot Brackets (Brushed Stainless Steel with vent slots)
+            for pcie_idx in range(4):
+                px = -0.055 + pcie_idx * 0.036
+                self._draw_box(px, -0.014, back_z - 0.003, 0.028, 0.022, 0.002, (0.65, 0.68, 0.74))
+                self._draw_box(px, -0.014, back_z - 0.004, 0.020, 0.014, 0.002, (0.08, 0.09, 0.11))
+                self._draw_box(px, -0.024, back_z - 0.005, 0.005, 0.005, 0.002, (0.85, 0.88, 0.92))
+
+            # Blue Server Identification UID Beacon LED
+            uid_blink = int(now * 2) % 2 == 0
+            uid_col = (0.0, 0.75, 1.0) if uid_blink else (0.02, 0.25, 0.40)
+            self._draw_box(0.045, 0.015, back_z - 0.005, 0.008, 0.008, 0.002, uid_col)
+
+        else:
+            # Router / Firewall / Demarc: Cooling exhaust vents and AUX/Console port
+            for vx in [-0.035, 0.035]:
+                self._draw_box(vx, 0.0, back_z - 0.004, 0.045, dev.height - 0.014, 0.002, (0.08, 0.09, 0.12))
+                self._draw_box(vx, 0.0, back_z - 0.005, 0.012, 0.012, 0.002, (0.45, 0.48, 0.52))
+            self._draw_box(0.0, 0.0, back_z - 0.004, 0.020, 0.016, 0.003, (0.40, 0.44, 0.48))
+            self._draw_box(0.0, 0.0, back_z - 0.006, 0.015, 0.012, 0.002, (0.04, 0.04, 0.05))
+
+        # 5. REAL 3D POWER CORDS (C13-to-C14) TO REAR PDUS (FEED A = BLUE, FEED B = RED)
+        cord_radius = 0.0062  # Heavy-duty 12AWG datacenter power cord (12.4mm diameter)
+
+        # Cord A: From PSU 1 on left to PDU-A on left rear post (Feed A - Enterprise Royal Blue)
+        c13_a_x = -0.125
+        self._draw_box(c13_a_x, 0.004, back_z - 0.016, 0.024, 0.018, 0.024, (0.08, 0.08, 0.10)) # C13 plug body
+        self._draw_box(c13_a_x, 0.004, back_z - 0.030, 0.016, 0.014, 0.014, (0.16, 0.18, 0.22)) # rubber boot
+        self._draw_box(c13_a_x, 0.004, back_z - 0.026, 0.018, 0.016, 0.006, (0.0, 0.48, 0.95))  # Feed A blue collar ring
+
+        p0_a = (c13_a_x, 0.004, back_z - 0.038)
+        p3_a_z = min(-0.340, back_z - 0.040)
+        p3_a = (-0.225, -0.016, p3_a_z)
+        # Molded IEC C14 Plug at PDU-A receptacle
+        self._draw_box(p3_a[0], p3_a[1], p3_a[2] + 0.014, 0.022, 0.016, 0.022, (0.08, 0.08, 0.10))
+        self._draw_box(p3_a[0], p3_a[1], p3_a[2] + 0.006, 0.018, 0.014, 0.006, (0.0, 0.48, 0.95))
+
+        # Natural gravitational catenary loop
+        p1_a = (p0_a[0] - 0.025, p0_a[1] - 0.065, p0_a[2] - 0.055)
+        p2_a = (p3_a[0] + 0.035, p3_a[1] - 0.055, p3_a[2] + 0.055)
+        self._draw_curved_cord(p0_a, p1_a, p2_a, p3_a, radius=cord_radius, color=(0.04, 0.38, 0.88), num_segments=12)
+
+        # Cord B: From PSU 2 on right to PDU-B on right rear post (Feed B - Enterprise Crimson Red)
+        c13_b_x = 0.125
+        self._draw_box(c13_b_x, 0.004, back_z - 0.016, 0.024, 0.018, 0.024, (0.08, 0.08, 0.10))
+        self._draw_box(c13_b_x, 0.004, back_z - 0.030, 0.016, 0.014, 0.014, (0.16, 0.18, 0.22))
+        self._draw_box(c13_b_x, 0.004, back_z - 0.026, 0.018, 0.016, 0.006, (0.88, 0.15, 0.15))
+
+        p0_b = (c13_b_x, 0.004, back_z - 0.038)
+        p3_b_z = min(-0.340, back_z - 0.040)
+        p3_b = (0.225, -0.016, p3_b_z)
+        # Molded IEC C14 Plug at PDU-B receptacle
+        self._draw_box(p3_b[0], p3_b[1], p3_b[2] + 0.014, 0.022, 0.016, 0.022, (0.08, 0.08, 0.10))
+        self._draw_box(p3_b[0], p3_b[1], p3_b[2] + 0.006, 0.018, 0.014, 0.006, (0.88, 0.15, 0.15))
+
+        p1_b = (p0_b[0] + 0.025, p0_b[1] - 0.065, p0_b[2] - 0.055)
+        p2_b = (p3_b[0] - 0.035, p3_b[1] - 0.055, p3_b[2] + 0.055)
+        self._draw_curved_cord(p0_b, p1_b, p2_b, p3_b, radius=cord_radius, color=(0.85, 0.15, 0.16), num_segments=12)
+
+        # 6. REAR DATA / STACKING / MANAGEMENT CABLING
+        if dev.device_type == "switch":
+            # Cisco StackWise-480 Heavy Braided Stacking Loop
+            sw_p0 = (-0.045, 0.006, back_z - 0.010)
+            sw_p3 = ( 0.035, 0.006, back_z - 0.010)
+            sw_p1 = (-0.045, 0.055, back_z - 0.075)
+            sw_p2 = ( 0.035, 0.055, back_z - 0.075)
+            self._draw_curved_cord(sw_p0, sw_p1, sw_p2, sw_p3, radius=0.0055, color=(0.28, 0.32, 0.38), num_segments=12)
+
+        elif dev.device_type == "server":
+            # Orange Cat6A Patch Cable from iDRAC Port to Left Cable Manager
+            idrac_p0 = (-0.048, 0.012, back_z - 0.008)
+            idrac_p3 = (-0.230, -0.045, min(-0.330, back_z - 0.030))
+            idrac_p1 = (-0.048, -0.040, back_z - 0.065)
+            idrac_p2 = (-0.180, -0.060, idrac_p3[2] + 0.040)
+            self._draw_curved_cord(idrac_p0, idrac_p1, idrac_p2, idrac_p3, radius=0.0035, color=(0.95, 0.48, 0.08), num_segments=10)
+
+    def _draw_rj45_connector(self, pos, normal, cable_color, is_laptop=False):
+        """Renders an authentic RJ45 modular plug with clear polycarbonate body, gold pins, molded snagless boot, and latch."""
+        nx, ny, nz = normal
+        fx, fy, fz = nx, ny, nz
+
+        # Up and Right orthogonal frame vectors
+        if abs(fy) < 0.9:
+            ux, uy, uz = 0.0, 1.0, 0.0
+        else:
+            ux, uy, uz = 0.0, 0.0, -1.0
+
+        r, g, b = cable_color
+        boot_color = (r * 0.82, g * 0.82, b * 0.82)
+        if is_laptop and abs(nx) > 0.5:
+            boot_color = (0.18, 0.20, 0.24)
+
+        def draw_box_rel(offset_f, offset_u, size_r, size_u, size_f, col):
+            cx = pos[0] + fx * offset_f + ux * offset_u
+            cy = pos[1] + fy * offset_f + uy * offset_u
+            cz = pos[2] + fz * offset_f + uz * offset_u
+            if abs(fz) > 0.9:
+                self._draw_box(cx, cy, cz, size_r, size_u, size_f, col)
+            else:
+                self._draw_box(cx, cy, cz, size_f, size_u, size_r, col)
+
+        # 1. Clear Polycarbonate 8P8C Plug Head (seated into socket, extends 0..7mm forward)
+        clear_head_color = (0.84, 0.90, 0.96)
+        draw_box_rel(0.0035, 0.0, 0.0112, 0.0075, 0.0070, clear_head_color)
+
+        # 2. Gold Contact Pins (visible inside the clear tip)
+        gold_color = (0.95, 0.78, 0.18)
+        draw_box_rel(0.0015, -0.0012, 0.0078, 0.0015, 0.0028, gold_color)
+
+        # 3. Molded Snagless Strain-Relief Rubber Boot (extends 7..18mm forward)
+        draw_box_rel(0.0125, 0.0, 0.0116, 0.0088, 0.0110, boot_color)
+
+        # 4. Snagless Release Latch Lever & Protective Hood (on top +U)
+        latch_color = (min(1.0, boot_color[0] * 1.25), min(1.0, boot_color[1] * 1.25), min(1.0, boot_color[2] * 1.25))
+        # Release clip lever
+        draw_box_rel(0.0105, 0.0050, 0.0034, 0.0018, 0.0080, latch_color)
+        # Snagless hood arch
+        draw_box_rel(0.0145, 0.0051, 0.0042, 0.0016, 0.0050, boot_color)
+
+        # 5. Tapered Collar / Strain-Relief Neck (extends 18..24mm forward)
+        draw_box_rel(0.0210, 0.0, 0.0074, 0.0074, 0.0060, boot_color)
+
+    def _render_cables(self, cables, devices=None, camera=None):
+        """
+        Renders 3D cables with Parallel Transport Bishop frames (zero twist), smooth round tube,
+        and authentic RJ45 connectors. Caches static cable geometry in an OpenGL display list.
+        """
+        if not cables:
+            return
+
+        # Angle / position culling: front patch cables are completely hidden behind racks in the hot aisle
+        cam_z = getattr(camera, "z", getattr(camera, "base_eye_z", 0.0)) if camera else 0.0
+        if cam_z < -1.65:
+            return
+
+        # Fast cache key to detect topology or cable state modifications
+        cables_key = (
+            len(cables),
+            tuple(
+                (id(c), c.cable_type, c.is_damaged,
+                 id(c.port_a), getattr(c.port_a, "name", ""),
+                 id(c.port_b), getattr(c.port_b, "name", ""),
+                 c.port_a.device.pos_x if c.port_a and c.port_a.device else 0,
+                 c.port_a.device.pos_y if c.port_a and c.port_a.device else 0,
+                 c.port_b.device.pos_x if c.port_b and c.port_b.device else 0,
+                 c.port_b.device.pos_y if c.port_b and c.port_b.device else 0)
+                for c in cables
+            )
+        )
+
+        if self.cables_display_list is None or self._cables_cache_key != cables_key:
+            if self.cables_display_list is not None:
+                try:
+                    glDeleteLists(self.cables_display_list, 1)
+                except Exception:
+                    pass
+            self.cables_display_list = glGenLists(1)
+            glNewList(self.cables_display_list, GL_COMPILE)
+            self._compile_cables_geometry(cables, devices)
+            glEndList()
+            self._cables_cache_key = cables_key
+
+        glCallList(self.cables_display_list)
+
+    def _compile_cables_geometry(self, cables, devices=None):
+        """Compiles 3D cables and RJ45 modular plugs into the display list."""
         glDisable(GL_LIGHTING)
 
+        # Precomputed 12-sided smooth cylinder trigonometry table (every 30 degrees)
+        NUM_SIDES = 12
+        cos_tab = (
+            1.0, 0.866025, 0.5, 0.0, -0.5, -0.866025,
+            -1.0, -0.866025, -0.5, 0.0, 0.5, 0.866025
+        )
+        sin_tab = (
+            0.0, 0.5, 0.866025, 1.0, 0.866025, 0.5,
+            0.0, -0.5, -0.866025, -1.0, -0.866025, -0.5
+        )
+
+        radius = 0.0030  # 3.0mm radius = 6.0mm Cat6 round patch cable
+        # Directional overhead datacenter lighting vector (0.0, 0.88, 0.47)
+        lx, ly, lz = 0.0, 0.88, 0.47
+
         for cable in cables:
-            pts = cable.compute_curve_points(num_segments=22)
+            pts = cable.compute_curve_points(num_segments=24, devices=devices)
             if len(pts) < 2:
                 continue
 
             r, g, b = cable.color
             if cable.is_damaged:
-                r, g, b = 0.90, 0.12, 0.12  # Vivid red for damaged / disconnected
+                r, g, b = 0.92, 0.15, 0.15  # Vivid red for damaged / disconnected
 
-            # 1. Smooth Cable Ribbon / Tube
-            glColor3f(r, g, b)
-            glLineWidth(4.0)
-            glBegin(GL_LINE_STRIP)
-            for p in pts:
-                glVertex3f(p[0], p[1], p[2])
-            glEnd()
-
-            # 2. Snagless Molded Rubber Strain-Relief Boot & RJ45 Clip at both ends
+            # 1. Render Authentic RJ45 Connectors at both endpoints
             for port in (cable.port_a, cable.port_b):
-                if not port:
+                if not port or not port.device:
                     continue
                 pp = port.get_world_pos()
-
-                # Snagless rubber boot (matches cable color)
-                boot_c = (r * 0.85, g * 0.85, b * 0.85)
-                if port.device and port.device.device_type == "laptop":
-                    lx = pp[0] - port.device.pos_x
-                    laptop_boot_c = (0.16, 0.18, 0.20)
-                    if lx < 0:
-                        # Left side port (eth0) -> boot extends to the left (-X)
-                        self._draw_box(pp[0] - 0.008, pp[1], pp[2], 0.012, 0.010, 0.013, laptop_boot_c)
-                    else:
-                        # Right side port (con0) -> boot extends to the right (+X)
-                        self._draw_box(pp[0] + 0.008, pp[1], pp[2], 0.012, 0.010, 0.013, laptop_boot_c)
+                is_laptop = (port.device.device_type == "laptop")
+                if is_laptop:
+                    lx_dev = pp[0] - port.device.pos_x
+                    normal = (-1.0, 0.0, 0.0) if lx_dev < 0 else (1.0, 0.0, 0.0)
                 else:
-                    self._draw_box(pp[0], pp[1], pp[2] + 0.014, 0.018, 0.016, 0.024, boot_c)
-                    self._draw_box(pp[0], pp[1] + 0.010, pp[2] + 0.016, 0.008, 0.006, 0.018, (0.85, 0.90, 0.95))
+                    normal = (0.0, 0.0, 1.0)
+
+                self._draw_rj45_connector(pp, normal, (r, g, b), is_laptop=is_laptop)
+
+            # 2. Compute Twist-Free Reference Frames using Parallel Transport (Bishop Frame)
+            N = len(pts)
+            frames = []
+            for i in range(N):
+                if i == 0:
+                    tx = pts[1][0] - pts[0][0]
+                    ty = pts[1][1] - pts[0][1]
+                    tz = pts[1][2] - pts[0][2]
+                elif i == N - 1:
+                    tx = pts[N-1][0] - pts[N-2][0]
+                    ty = pts[N-1][1] - pts[N-2][1]
+                    tz = pts[N-1][2] - pts[N-2][2]
+                else:
+                    tx = pts[i+1][0] - pts[i-1][0]
+                    ty = pts[i+1][1] - pts[i-1][1]
+                    tz = pts[i+1][2] - pts[i-1][2]
+
+                t_len = math.sqrt(tx*tx + ty*ty + tz*tz)
+                if t_len > 1e-6:
+                    tx, ty, tz = tx / t_len, ty / t_len, tz / t_len
+                else:
+                    tx, ty, tz = 0.0, 0.0, 1.0
+
+                if i == 0:
+                    # Initial normal orthogonal to t0
+                    if abs(ty) < 0.92:
+                        ref_x, ref_y, ref_z = 0.0, 1.0, 0.0
+                    else:
+                        ref_x, ref_y, ref_z = 1.0, 0.0, 0.0
+                    dot = ref_x * tx + ref_y * ty + ref_z * tz
+                    nx = ref_x - dot * tx
+                    ny = ref_y - dot * ty
+                    nz = ref_z - dot * tz
+                    n_len = math.sqrt(nx*nx + ny*ny + nz*nz)
+                    if n_len > 1e-6:
+                        nx, ny, nz = nx / n_len, ny / n_len, nz / n_len
+                    else:
+                        nx, ny, nz = 1.0, 0.0, 0.0
+                else:
+                    # Parallel transport previous normal onto plane orthogonal to current tangent
+                    prev_n = frames[-1][1]
+                    dot = prev_n[0] * tx + prev_n[1] * ty + prev_n[2] * tz
+                    nx = prev_n[0] - dot * tx
+                    ny = prev_n[1] - dot * ty
+                    nz = prev_n[2] - dot * tz
+                    n_len = math.sqrt(nx*nx + ny*ny + nz*nz)
+                    if n_len > 1e-6:
+                        nx, ny, nz = nx / n_len, ny / n_len, nz / n_len
+                    else:
+                        nx, ny, nz = prev_n[0], prev_n[1], prev_n[2]
+
+                bx = ty * nz - tz * ny
+                by = tz * nx - tx * nz
+                bz = tx * ny - ty * nx
+                frames.append(((tx, ty, tz), (nx, ny, nz), (bx, by, bz)))
+
+            # 3. Compute Smooth Ring Vertices & Per-Vertex Gouraud Illumination
+            rings = []
+            ring_colors = []
+            for i in range(N):
+                p_curr = pts[i]
+                _, (nx, ny, nz), (bx, by, bz) = frames[i]
+
+                ring_verts = []
+                ring_cols = []
+                for k in range(NUM_SIDES):
+                    c, s = cos_tab[k], sin_tab[k]
+                    # Radial normal on the cylindrical tube surface
+                    vnx = c * nx + s * bx
+                    vny = c * ny + s * by
+                    vnz = c * nz + s * bz
+
+                    vx = p_curr[0] + vnx * radius
+                    vy = p_curr[1] + vny * radius
+                    vz = p_curr[2] + vnz * radius
+                    ring_verts.append((vx, vy, vz))
+
+                    # Continuous smooth diffuse lighting from overhead datacenter lights
+                    dot_l = max(0.0, vnx * lx + vny * ly + vnz * lz)
+                    bright = 0.45 + 0.55 * dot_l
+                    # Subtle specular shine running along the top of the round cable
+                    if dot_l > 0.55:
+                        bright = min(1.35, bright + ((dot_l - 0.55) ** 2) * 0.45)
+
+                    cr = min(1.0, r * bright)
+                    cg = min(1.0, g * bright)
+                    cb = min(1.0, b * bright)
+                    ring_cols.append((cr, cg, cb))
+
+                rings.append(ring_verts)
+                ring_colors.append(ring_cols)
+
+            # 4. Render Seamless Smooth Round Tube with Gouraud Shading
+            glBegin(GL_QUADS)
+            for i in range(N - 1):
+                r0 = rings[i]
+                r1 = rings[i + 1]
+                c0 = ring_colors[i]
+                c1 = ring_colors[i + 1]
+                for k in range(NUM_SIDES):
+                    k_next = (k + 1) % NUM_SIDES
+                    glColor3f(*c0[k])
+                    glVertex3f(*r0[k])
+                    glColor3f(*c0[k_next])
+                    glVertex3f(*r0[k_next])
+                    glColor3f(*c1[k_next])
+                    glVertex3f(*r1[k_next])
+                    glColor3f(*c1[k])
+                    glVertex3f(*r1[k])
+            glEnd()
 
     def _render_highlight(self, dev, port, now):
         """Draws neon cyan/golden wireframe bounding box with animated targeting brackets."""
@@ -1216,36 +2113,48 @@ class Renderer3D:
         glEnable(GL_DEPTH_TEST)
 
     def _draw_box(self, x, y, z, w, h, d, color):
-        glColor3f(*color)
+        """Draws a 3D box with directional illumination for crisp edge definition and contrast."""
+        r, g, b = color[0], color[1], color[2]
         hw, hh, hd = w / 2.0, h / 2.0, d / 2.0
 
         glBegin(GL_QUADS)
-        # Front
+        # Front (+Z, direct frontal eye-level light)
+        glColor3f(r, g, b)
         glVertex3f(x - hw, y - hh, z + hd)
         glVertex3f(x + hw, y - hh, z + hd)
         glVertex3f(x + hw, y + hh, z + hd)
         glVertex3f(x - hw, y + hh, z + hd)
-        # Back
+
+        # Back (-Z, away from aisle light)
+        glColor3f(r * 0.72, g * 0.72, b * 0.72)
         glVertex3f(x - hw, y - hh, z - hd)
         glVertex3f(x - hw, y + hh, z - hd)
         glVertex3f(x + hw, y + hh, z - hd)
         glVertex3f(x + hw, y - hh, z - hd)
-        # Top
+
+        # Top (+Y, bright overhead datacenter ceiling LED panels)
+        glColor3f(min(1.0, r * 1.15), min(1.0, g * 1.15), min(1.0, b * 1.15))
         glVertex3f(x - hw, y + hh, z - hd)
         glVertex3f(x - hw, y + hh, z + hd)
         glVertex3f(x + hw, y + hh, z + hd)
         glVertex3f(x + hw, y + hh, z - hd)
-        # Bottom
+
+        # Bottom (-Y, underside contact shadow)
+        glColor3f(r * 0.58, g * 0.58, b * 0.58)
         glVertex3f(x - hw, y - hh, z - hd)
         glVertex3f(x + hw, y - hh, z - hd)
         glVertex3f(x + hw, y - hh, z + hd)
         glVertex3f(x - hw, y - hh, z + hd)
-        # Right
+
+        # Right (+X, directional side shadow)
+        glColor3f(r * 0.85, g * 0.85, b * 0.85)
         glVertex3f(x + hw, y - hh, z - hd)
         glVertex3f(x + hw, y + hh, z - hd)
         glVertex3f(x + hw, y + hh, z + hd)
         glVertex3f(x + hw, y - hh, z + hd)
-        # Left
+
+        # Left (-X, directional side shadow)
+        glColor3f(r * 0.88, g * 0.88, b * 0.88)
         glVertex3f(x - hw, y - hh, z - hd)
         glVertex3f(x - hw, y - hh, z + hd)
         glVertex3f(x - hw, y + hh, z + hd)

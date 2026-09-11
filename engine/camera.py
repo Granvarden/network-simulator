@@ -16,13 +16,44 @@ class FPSCamera:
         self.speed = 3.2
         self.sprint_multiplier = 1.6
 
-        # Room bounds (Datacenter size: X: -4.5 to 4.5, Z: -5.5 to 4.5)
-        self.bounds_x = (-4.5, 4.5)
-        self.bounds_z = (-5.5, 4.5)
+        # Datacenter Room Navigable Bounds (Room is -6.0 to +6.0, margin 0.35m for walls/baseboards)
+        self.bounds_x = (-5.65, 5.65)
+        self.bounds_z = (-5.65, 5.65)
+        self.player_radius = 0.20
         self.stand_height = 1.65
         self.crouch_height = 0.85
         self.eye_height = 1.65
         self.is_crouching = False
+
+    def _is_colliding(self, x, z, radius=None):
+        r = self.player_radius if radius is None else radius
+
+        # Room perimeter walls
+        if x < (self.bounds_x[0] + r) or x > (self.bounds_x[1] - r):
+            return True
+        if z < (self.bounds_z[0] + r) or z > (self.bounds_z[1] - r):
+            return True
+
+        # 1. Three Server Racks (Exact physical footprint: 0.60m wide, 0.80m deep at z = -1.5)
+        # Racks at x = -1.4, 0.0, 1.4. Depth: z in [-1.90, -1.10]
+        for rx in (-1.4, 0.0, 1.4):
+            if (rx - 0.30 - r) < x < (rx + 0.30 + r) and (-1.90 - r) < z < (-1.10 + r):
+                return True
+
+        # 2. Workbench Desk (center x = -3.2, z = 0.5, width = 1.4, depth = 0.75)
+        if (-3.90 - r) < x < (-2.50 + r) and (0.125 - r) < z < (0.875 + r):
+            return True
+
+        # 3. CRAC Cooling Units on Right Wall (center x = 5.25, z = -2.0 and 1.8, w = 0.95, d = 1.25)
+        for cz in (-2.0, 1.8):
+            if (4.75 - r) < x < (5.75 + r) and (cz - 0.63 - r) < z < (cz + 0.63 + r):
+                return True
+
+        # 4. FM-200 Fire Suppression Cylinders on Left Wall (center x = -5.75, z in [-4.5, -3.6])
+        if (-5.95 - r) < x < (-5.55 + r) and (-4.50 - r) < z < (-3.60 + r):
+            return True
+
+        return False
 
     def handle_mouse(self, dx, dy):
         # Moving mouse right (dx > 0) turns right (+yaw)
@@ -87,24 +118,16 @@ class FPSCamera:
             move_x += right_x * speed
             move_z += right_z * speed
 
-        # Apply movement with Datacenter collision bounds
+        # Apply movement with smooth axis-independent sliding collision
+        # 1. Try moving along X
         new_x = self.x + move_x
+        if not self._is_colliding(new_x, self.z):
+            self.x = new_x
+
+        # 2. Try moving along Z
         new_z = self.z + move_z
-
-        # Collision with Datacenter racks row (racks are located around z = -1.5, x between -2.8 and 2.8)
-        rack_collision = False
-        if -2.3 < new_z < -0.7 and -2.8 < new_x < 2.8:
-            rack_collision = True
-
-        if not rack_collision:
-            self.x = max(self.bounds_x[0], min(self.bounds_x[1], new_x))
-            self.z = max(self.bounds_z[0], min(self.bounds_z[1], new_z))
-        else:
-            # Slide along free axis
-            if not (-2.3 < self.z < -0.7 and -2.8 < new_x < 2.8):
-                self.x = max(self.bounds_x[0], min(self.bounds_x[1], new_x))
-            elif not (-2.3 < new_z < -0.7 and -2.8 < self.x < 2.8):
-                self.z = max(self.bounds_z[0], min(self.bounds_z[1], new_z))
+        if not self._is_colliding(self.x, new_z):
+            self.z = new_z
 
     def apply_view(self):
         """Applies FPS view matrix using gluLookAt."""

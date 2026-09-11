@@ -6,6 +6,7 @@ All clickable elements use unified, single-source-of-truth pygame.Rect layout de
 
 import pygame
 import time
+import math
 from engine.audio import SoundManager
 from network.packet_engine import PacketEngine
 from cli.command_executor import CommandExecutor
@@ -21,6 +22,7 @@ class LaptopGUI:
         self.height = min(660, screen_h - 60)
         self.surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
         self.is_open = False
+        self._wallpaper_surface = None
 
         # Fonts
         if not pygame.font.get_init():
@@ -589,24 +591,410 @@ class LaptopGUI:
 
         return self.surface
 
+    @staticmethod
+    def _create_smooth_petal(cx, cy, length, max_width, angle_deg, curve_sweep=0.0):
+        """Generates a smooth, natural curved petal polygon with tapered tip."""
+        rad = math.radians(angle_deg)
+        cos_a = math.cos(rad)
+        sin_a = math.sin(rad)
+        perp_cos = -sin_a
+        perp_sin = cos_a
+
+        pts = [(cx, cy)]
+        steps = 22
+        # Left flank
+        for i in range(1, steps):
+            t = i / float(steps)
+            dist = length * t
+            width = math.sin(math.pi * (t ** 0.85)) * (max_width * 0.5)
+            sweep = (t ** 1.8) * curve_sweep * length * 0.25
+            px = cx + cos_a * dist + perp_cos * (width + sweep)
+            py = cy + sin_a * dist + perp_sin * (width + sweep)
+            pts.append((int(px), int(py)))
+
+        # Tip point
+        tip_sweep = curve_sweep * length * 0.25
+        tip_x = cx + cos_a * length + perp_cos * tip_sweep
+        tip_y = cy + sin_a * length + perp_sin * tip_sweep
+        pts.append((int(tip_x), int(tip_y)))
+
+        # Right flank
+        for i in range(steps - 1, 0, -1):
+            t = i / float(steps)
+            dist = length * t
+            width = -math.sin(math.pi * (t ** 0.85)) * (max_width * 0.5)
+            sweep = (t ** 1.8) * curve_sweep * length * 0.25
+            px = cx + cos_a * dist + perp_cos * (width + sweep)
+            py = cy + sin_a * dist + perp_sin * (width + sweep)
+            pts.append((int(px), int(py)))
+
+        return pts
+
+    def _generate_windows_wallpaper(self, dw, dh):
+        """Generates authentic Windows 11 Bloom wallpaper with layered luminous petals."""
+        surf = pygame.Surface((dw, dh))
+
+        # Deep midnight navy to royal blue vertical gradient
+        for y in range(dh):
+            prog = y / float(dh)
+            r = int(10 + 15 * prog)
+            g = int(22 + 38 * prog)
+            b = int(50 + 68 * prog)
+            pygame.draw.line(surf, (r, g, b), (0, y), (dw, y))
+
+        cx, cy = dw // 2, dh // 2 - 15
+
+        # Ultra-smooth continuous radial glow using downscale + smoothscale
+        glow_size = 120
+        glow_surf = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
+        gcx, gcy = glow_size // 2, glow_size // 2
+        for r in range(gcx, 0, -1):
+            t = 1.0 - (r / float(gcx))
+            alpha = int(90 * (t ** 1.8))
+            pygame.draw.circle(glow_surf, (0, 130, 255, alpha), (gcx, gcy), r)
+
+        target_glow_w = int(dw * 0.72)
+        target_glow_h = int(dh * 0.92)
+        scaled_glow = pygame.transform.smoothscale(glow_surf, (target_glow_w, target_glow_h))
+        surf.blit(scaled_glow, (cx - target_glow_w // 2, cy - target_glow_h // 2))
+
+        # Bloom Petal Ribbons
+        bloom_surf = pygame.Surface((dw, dh), pygame.SRCALPHA)
+        petal_specs = [
+            # Layer 1: Deep Sapphire Outer Wings
+            (210, 110, -135, -0.35, (0, 60, 140, 190), (0, 95, 195, 220), 160),
+            (215, 115, -45, 0.35, (0, 65, 145, 190), (0, 100, 200, 220), 160),
+            (230, 120, -90, 0.0, (0, 70, 155, 195), (0, 110, 215, 225), 180),
+            (220, 105, -112, -0.2, (0, 65, 150, 195), (0, 105, 205, 220), 170),
+            (220, 105, -68, 0.2, (0, 68, 152, 195), (0, 108, 208, 220), 170),
+
+            # Layer 2: Rich Azure Mid Petals
+            (190, 95, -150, -0.25, (0, 85, 185, 210), (20, 135, 240, 230), 200),
+            (195, 95, -30, 0.25, (0, 90, 190, 210), (25, 140, 245, 230), 200),
+            (185, 90, -125, -0.15, (0, 100, 205, 215), (40, 155, 255, 235), 210),
+            (190, 90, -55, 0.15, (0, 105, 210, 215), (45, 160, 255, 235), 210),
+            (200, 100, -90, -0.05, (0, 115, 225, 220), (60, 175, 255, 240), 220),
+
+            # Layer 3: Vibrant Glowing Sky Petals
+            (165, 80, -108, -0.15, (10, 135, 250, 230), (80, 195, 255, 245), 230),
+            (170, 80, -72, 0.15, (20, 145, 255, 230), (95, 205, 255, 245), 230),
+            (150, 75, -135, -0.1, (0, 125, 240, 225), (75, 190, 255, 240), 220),
+            (155, 75, -45, 0.1, (10, 130, 245, 225), (85, 195, 255, 240), 220),
+
+            # Layer 4: Luminous Inner Core Ribbons
+            (135, 65, -96, -0.08, (60, 175, 255, 240), (160, 230, 255, 255), 240),
+            (140, 68, -84, 0.08, (75, 185, 255, 240), (180, 238, 255, 255), 240),
+            (110, 52, -90, 0.0, (110, 205, 255, 245), (220, 248, 255, 255), 250),
+
+            # Layer 5: Bottom Fold / Base Collar
+            (130, 75, 40, 0.2, (0, 75, 165, 200), (0, 115, 220, 225), 180),
+            (135, 75, 140, -0.2, (0, 70, 160, 200), (0, 110, 215, 225), 180),
+            (115, 70, 90, 0.0, (0, 90, 185, 215), (20, 140, 240, 230), 200),
+            (95, 60, 80, -0.08, (0, 110, 215, 225), (60, 175, 255, 235), 210),
+            (95, 60, 100, 0.08, (0, 110, 215, 225), (60, 175, 255, 235), 210),
+        ]
+
+        for length, width, angle, sweep, fill, edge, sheen_a in petal_specs:
+            pts = self._create_smooth_petal(cx, cy + 20, length, width, angle, sweep)
+            pygame.draw.polygon(bloom_surf, fill, pts)
+            pygame.draw.polygon(bloom_surf, edge, pts, width=2)
+            half_pts = pts[len(pts)//4 : len(pts)//2 + 2]
+            if len(half_pts) >= 2:
+                pygame.draw.lines(bloom_surf, (220, 245, 255, sheen_a), False, half_pts, width=2)
+
+        pygame.draw.circle(bloom_surf, (160, 230, 255, 200), (cx, cy + 20), 12)
+        pygame.draw.circle(bloom_surf, (245, 252, 255, 240), (cx, cy + 20), 5)
+
+        surf.blit(bloom_surf, (0, 0))
+        return surf
+
+    def _generate_ubuntu_wallpaper(self, dw, dh):
+        """Generates authentic Ubuntu 22.04 LTS Jammy Jellyfish geometric wallpaper."""
+        surf = pygame.Surface((dw, dh))
+
+        # Rich aubergine diagonal gradient
+        for y in range(dh):
+            prog = y / float(dh)
+            r = int(44 + 26 * prog)
+            g = int(6 + 10 * prog)
+            b = int(48 - 20 * prog)
+            pygame.draw.line(surf, (r, g, b), (0, y), (dw, y))
+
+        glow_surf = pygame.Surface((dw, dh), pygame.SRCALPHA)
+        cx, cy = int(dw * 0.65), int(dh * 0.44)
+
+        # Concentric sonar water ripples
+        for r_ring, a_ring in [(170, 25), (240, 18), (310, 12), (380, 8)]:
+            pygame.draw.circle(glow_surf, (240, 110, 45, a_ring), (cx, cy - 25), r_ring, width=1)
+
+        # Ambient purple aura
+        for radius, alpha in [(260, 18), (180, 30), (110, 42)]:
+            pygame.draw.circle(glow_surf, (155, 40, 115, alpha), (cx, cy), radius)
+
+        # Jammy Jellyfish Bell Dome
+        bell_w = 145
+        bell_h = 135
+        dome_outline = []
+        for i in range(17):
+            ang = math.pi + i * (math.pi / 16.0)
+            px = cx + math.cos(ang) * bell_w
+            py = cy - 25 + math.sin(ang) * bell_h
+            dome_outline.append((int(px), int(py)))
+
+        rim_pts = [
+            (cx + bell_w, cy - 20),
+            (cx + 105, cy - 10),
+            (cx + 60, cy),
+            (cx + 15, cy - 12),
+            (cx - 35, cy - 2),
+            (cx - 85, cy - 12),
+            (cx - bell_w, cy - 20),
+        ]
+        full_dome = dome_outline + rim_pts
+
+        pygame.draw.polygon(glow_surf, (233, 84, 32, 22), full_dome)
+        pygame.draw.polygon(glow_surf, (233, 84, 32, 160), full_dome, width=2)
+
+        # Internal facet grid
+        facet_lines = [
+            ((cx - 100, cy - 90), (cx - 35, cy - 2)),
+            ((cx - 45, cy - 130), (cx + 15, cy - 12)),
+            ((cx + 45, cy - 130), (cx + 60, cy)),
+            ((cx + 100, cy - 90), (cx + 105, cy - 10)),
+            ((cx - 100, cy - 90), (cx - 45, cy - 130)),
+            ((cx - 45, cy - 130), (cx + 45, cy - 130)),
+            ((cx + 45, cy - 130), (cx + 100, cy - 90)),
+            ((cx - 125, cy - 50), (cx - 85, cy - 12)),
+            ((cx + 125, cy - 50), (cx + 105, cy - 10)),
+            ((cx - 100, cy - 90), (cx + 15, cy - 12)),
+            ((cx + 100, cy - 90), (cx + 15, cy - 12)),
+        ]
+        for p1, p2 in facet_lines:
+            pygame.draw.line(glow_surf, (255, 135, 45, 90), p1, p2, width=1)
+
+        # Flowing tentacles
+        tentacles_def = [
+            [(cx - 105, cy - 15), (cx - 125, cy + 50), (cx - 95, cy + 130), (cx - 115, cy + 220), (cx - 105, cy + 280)],
+            [(cx - 60, cy - 5), (cx - 35, cy + 65), (cx - 75, cy + 145), (cx - 45, cy + 235), (cx - 60, cy + 290)],
+            [(cx - 10, cy - 8), (cx + 25, cy + 60), (cx - 5, cy + 140), (cx + 30, cy + 225), (cx + 15, cy + 285)],
+            [(cx + 40, cy - 3), (cx + 70, cy + 55), (cx + 45, cy + 135), (cx + 80, cy + 215), (cx + 65, cy + 275)],
+            [(cx + 85, cy - 8), (cx + 115, cy + 45), (cx + 95, cy + 125), (cx + 120, cy + 205), (cx + 110, cy + 265)],
+        ]
+        for t_idx, tent in enumerate(tentacles_def):
+            alpha = 140 if t_idx in (1, 2, 3) else 95
+            pygame.draw.lines(glow_surf, (233, 84, 32, alpha), False, tent, width=2)
+            for p in tent[1:-1]:
+                pygame.draw.circle(glow_surf, (255, 175, 60, alpha + 30), p, 2)
+
+        surf.blit(glow_surf, (0, 0))
+        return surf
+
+    def _draw_vector_firefox(self, surface, rect):
+        """Draws stylized Firefox vector icon."""
+        cx, cy = rect.centerx, rect.centery
+        r = min(rect.width, rect.height) // 2 - 2
+
+        pygame.draw.circle(surface, (20, 60, 150), (cx, cy), r)
+        pygame.draw.circle(surface, (30, 110, 225), (cx - r//5, cy - r//5), int(r * 0.75))
+        pygame.draw.circle(surface, (60, 160, 255), (cx - r//3, cy - r//3), int(r * 0.45))
+
+        pts_tail = [
+            (cx - r + 1, cy + r//3),
+            (cx - int(r*0.8), cy + int(r*0.9)),
+            (cx, cy + r + 1),
+            (cx + int(r*0.9), cy + int(r*0.6)),
+            (cx + r + 1, cy),
+            (cx + int(r*0.8), cy - int(r*0.7)),
+            (cx + int(r*0.4), cy - r),
+            (cx + int(r*0.1), cy - int(r*0.6)),
+            (cx + int(r*0.5), cy - int(r*0.2)),
+            (cx + int(r*0.6), cy + int(r*0.3)),
+            (cx + int(r*0.2), cy + int(r*0.6)),
+            (cx - int(r*0.4), cy + int(r*0.4)),
+            (cx - int(r*0.7), cy),
+        ]
+        pygame.draw.polygon(surface, (235, 75, 20), pts_tail)
+
+        pts_flame = [
+            (cx - int(r*0.7), cy + int(r*0.7)),
+            (cx - int(r*0.1), cy + int(r*0.9)),
+            (cx + int(r*0.7), cy + int(r*0.6)),
+            (cx + int(r*0.9), cy + int(r*0.1)),
+            (cx + int(r*0.7), cy - int(r*0.4)),
+            (cx + int(r*0.4), cy - int(r*0.2)),
+            (cx + int(r*0.5), cy + int(r*0.2)),
+            (cx + int(r*0.2), cy + int(r*0.5)),
+            (cx - int(r*0.3), cy + int(r*0.5)),
+        ]
+        pygame.draw.polygon(surface, (255, 185, 25), pts_flame)
+
+        pts_ear = [
+            (cx + int(r*0.4), cy - r),
+            (cx + int(r*0.75), cy - int(r*0.85)),
+            (cx + int(r*0.6), cy - int(r*0.45)),
+        ]
+        pygame.draw.polygon(surface, (255, 140, 0), pts_ear)
+
+    def _draw_vector_edge(self, surface, rect):
+        """Draws Microsoft Edge wave vector icon."""
+        cx, cy = rect.centerx, rect.centery
+        r = min(rect.width, rect.height) // 2 - 2
+
+        pygame.draw.circle(surface, (0, 80, 190), (cx, cy), r)
+        pygame.draw.circle(surface, (0, 165, 245), (cx - 2, cy - 3), int(r * 0.85))
+
+        pts_wave = [
+            (cx - r + 1, cy),
+            (cx - int(r*0.6), cy + int(r*0.8)),
+            (cx + int(r*0.4), cy + int(r*0.85)),
+            (cx + r, cy + int(r*0.3)),
+            (cx + int(r*0.5), cy + int(r*0.1)),
+            (cx, cy + int(r*0.4)),
+            (cx - int(r*0.5), cy + int(r*0.3)),
+        ]
+        pygame.draw.polygon(surface, (0, 205, 140), pts_wave)
+
+        pygame.draw.circle(surface, (0, 120, 215), (cx + int(r*0.25), cy - int(r*0.15)), int(r * 0.45))
+        pygame.draw.circle(surface, (255, 255, 255), (cx + int(r*0.35), cy - int(r*0.2)), int(r * 0.28))
+
+    def _draw_vector_terminal(self, surface, rect, is_windows=False):
+        """Draws sleek Terminal console vector icon."""
+        x, y, w, h = rect.x, rect.y, rect.width, rect.height
+        pad = max(2, min(w, h) // 8)
+        tw, th = w - pad * 2, h - pad * 2
+        tx, ty = x + pad, y + pad
+
+        base_col = (16, 20, 28) if is_windows else (28, 28, 34)
+        pygame.draw.rect(surface, base_col, (tx, ty, tw, th), border_radius=max(3, tw//6))
+        pygame.draw.rect(surface, (55, 65, 80) if is_windows else (60, 55, 65), (tx, ty, tw, th), width=1, border_radius=max(3, tw//6))
+
+        hb_h = max(4, th // 4)
+        pygame.draw.rect(surface, (30, 36, 48) if is_windows else (48, 32, 45), (tx, ty, tw, hb_h), border_top_left_radius=max(3, tw//6), border_top_right_radius=max(3, tw//6))
+
+        dot_r = max(1, hb_h // 4)
+        for i, dot_col in enumerate([(235, 80, 80), (240, 180, 40), (60, 200, 80)] if not is_windows else [(120, 140, 160)]*3):
+            pygame.draw.circle(surface, dot_col, (tx + 4 + i * (dot_r * 2 + 2), ty + hb_h // 2), dot_r)
+
+        prompt_col = (0, 220, 255) if is_windows else (75, 220, 100)
+        px = tx + max(4, tw // 5)
+        py = ty + hb_h + (th - hb_h) // 2
+        sz = max(3, tw // 6)
+        pts_chevron = [
+            (px - sz//2, py - sz),
+            (px + sz//2, py),
+            (px - sz//2, py + sz)
+        ]
+        pygame.draw.lines(surface, prompt_col, False, pts_chevron, width=max(1, sz//2))
+
+        cx = px + sz + 2
+        cw = max(3, sz)
+        pygame.draw.line(surface, (255, 255, 255) if is_windows else (233, 84, 32), (cx, py + sz), (cx + cw, py + sz), width=max(1, sz//2))
+
+    def _draw_vector_settings(self, surface, rect):
+        """Draws metallic/Fluent gear cog vector icon."""
+        cx, cy = rect.centerx, rect.centery
+        r = min(rect.width, rect.height) // 2 - 2
+
+        gear_col = (115, 130, 150)
+        inner_col = (48, 58, 72)
+
+        num_teeth = 8
+        tooth_len = max(2, r // 4)
+        tooth_w = max(2, int(r * 0.3))
+        for i in range(num_teeth):
+            angle = i * (2 * math.pi / num_teeth)
+            tx = cx + int(math.cos(angle) * (r - tooth_len // 2))
+            ty = cy + int(math.sin(angle) * (r - tooth_len // 2))
+            pygame.draw.circle(surface, gear_col, (tx, ty), tooth_w)
+
+        pygame.draw.circle(surface, gear_col, (cx, cy), r - tooth_len // 3)
+        pygame.draw.circle(surface, inner_col, (cx, cy), int(r * 0.72))
+        pygame.draw.circle(surface, (22, 26, 34), (cx, cy), int(r * 0.38))
+        pygame.draw.circle(surface, (160, 180, 205), (cx, cy), int(r * 0.38), width=1)
+
+    def _draw_vector_putty(self, surface, rect):
+        """Draws serial terminal console vector icon."""
+        cx, cy = rect.centerx, rect.centery
+        w, h = rect.width, rect.height
+        pad = max(2, min(w, h) // 8)
+        tw, th = w - pad * 2, h - pad * 2
+        tx, ty = cx - tw // 2, cy - th // 2
+
+        pygame.draw.rect(surface, (30, 50, 90), (tx, ty, tw, th - max(3, th//5)), border_radius=max(2, tw//8))
+        pygame.draw.rect(surface, (70, 110, 180), (tx, ty, tw, th - max(3, th//5)), width=1, border_radius=max(2, tw//8))
+
+        screen_rect = pygame.Rect(tx + 2, ty + 2, tw - 4, th - max(3, th//5) - 4)
+        pygame.draw.rect(surface, (10, 25, 55), screen_rect, border_radius=2)
+
+        lx, ly = screen_rect.centerx, screen_rect.centery
+        pts_bolt = [
+            (lx - screen_rect.width//3, ly - screen_rect.height//4),
+            (lx, ly),
+            (lx - 2, ly + 1),
+            (lx + screen_rect.width//3, ly + screen_rect.height//3),
+            (lx + 1, ly - 1),
+            (lx + 4, ly - screen_rect.height//3),
+        ]
+        pygame.draw.lines(surface, (255, 200, 30), False, pts_bolt, width=max(1, tw//15))
+
+        stand_w = max(4, tw // 3)
+        stand_h = max(2, th // 6)
+        pygame.draw.rect(surface, (50, 70, 100), (cx - stand_w//2, ty + th - stand_h, stand_w, stand_h), border_radius=1)
+
+    def _draw_vector_start(self, surface, rect):
+        """Draws official Windows 11 4-square Fluent Start icon."""
+        cx, cy = rect.centerx, rect.centery
+        sz = max(4, min(rect.width, rect.height) // 2 - 2)
+        gap = 2
+        sq = sz - gap // 2
+        col = (0, 120, 215)
+
+        pygame.draw.rect(surface, col, (cx - sq - 1, cy - sq - 1, sq, sq), border_radius=1)
+        pygame.draw.rect(surface, col, (cx + 1, cy - sq - 1, sq, sq), border_radius=1)
+        pygame.draw.rect(surface, col, (cx - sq - 1, cy + 1, sq, sq), border_radius=1)
+        pygame.draw.rect(surface, col, (cx + 1, cy + 1, sq, sq), border_radius=1)
+
+    def _draw_vector_search(self, surface, rect):
+        """Draws magnifying glass search icon."""
+        cx, cy = rect.centerx, rect.centery
+        r = max(3, min(rect.width, rect.height) // 3)
+        col = (100, 115, 130)
+
+        pygame.draw.circle(surface, col, (cx - 1, cy - 1), r, width=max(1, r//3))
+        hx = cx - 1 + int(r * 0.7)
+        hy = cy - 1 + int(r * 0.7)
+        pygame.draw.line(surface, col, (hx, hy), (hx + r - 1, hy + r - 1), width=max(1, r//3))
+
+    def _draw_system_tray_icons(self, surface, x, y, is_up=True, is_windows=True):
+        """Draws mini vector tray icons: Network, Speaker, Battery."""
+        fg = (40, 50, 65) if is_windows else (220, 220, 220)
+
+        # 1. Network / Ethernet Icon
+        net_col = (10, 160, 60) if is_up else (190, 40, 40)
+        pygame.draw.rect(surface, net_col if not is_windows else fg, (x, y + 2, 14, 10), width=1, border_radius=2)
+        pygame.draw.rect(surface, net_col, (x + 3, y + 5, 8, 4))
+        pygame.draw.line(surface, fg, (x + 5, y + 12), (x + 9, y + 12), width=1)
+
+        # 2. Speaker Icon
+        sx = x + 20
+        pygame.draw.rect(surface, fg, (sx, y + 4, 3, 6))
+        pygame.draw.polygon(surface, fg, [(sx + 3, y + 4), (sx + 8, y + 1), (sx + 8, y + 13), (sx + 3, y + 10)])
+        pygame.draw.arc(surface, fg, (sx + 6, y + 2, 8, 10), -math.pi/3, math.pi/3, 1)
+
+        # 3. Battery Icon
+        bx = sx + 20
+        pygame.draw.rect(surface, fg, (bx, y + 3, 16, 8), width=1, border_radius=2)
+        pygame.draw.rect(surface, fg, (bx + 16, y + 5, 2, 4), border_radius=1)
+        pygame.draw.rect(surface, (10, 180, 70), (bx + 2, y + 5, 10, 4))
+
     def _render_windows_desktop(self):
         L = self.layout
         dx, dy, dw, dh = L["dx"], L["dy"], L["dw"], L["dh"]
-        mx, my = self.hover_pos
 
-        # Windows 11 Cyan Bloom Background Gradient
-        for y in range(dh):
-            prog = y / float(dh)
-            r = int(18 + 25 * prog)
-            g = int(58 + 70 * prog)
-            b = int(130 + 95 * prog)
-            pygame.draw.line(self.surface, (r, g, b), (dx, dy + y), (dx + dw, dy + y))
-
-        # Bloom abstract floral petal art in center
-        cx, cy = dx + dw // 2, dy + dh // 2 - 20
-        pygame.draw.circle(self.surface, (70, 140, 240), (cx, cy), 130)
-        pygame.draw.circle(self.surface, (110, 180, 255), (cx + 25, cy - 20), 90)
-        pygame.draw.circle(self.surface, (160, 215, 255), (cx - 30, cy + 20), 75)
+        # Cache wallpaper surface for high-performance 60 FPS rendering
+        if self._wallpaper_surface is None or self._wallpaper_surface.get_size() != (dw, dh):
+            self._wallpaper_surface = self._generate_windows_wallpaper(dw, dh)
+        self.surface.blit(self._wallpaper_surface, (dx, dy))
 
         # Desktop Icons
         self._draw_desktop_icon_box(L["desktop_icons"]["browser"], "Edge", (0, 120, 215), "WEB")
@@ -614,82 +1002,69 @@ class LaptopGUI:
         self._draw_desktop_icon_box(L["desktop_icons"]["putty"], "PuTTY", (20, 50, 160), "SER")
         self._draw_desktop_icon_box(L["desktop_icons"]["terminal"], "Terminal", (15, 15, 20), "CMD")
 
-        # Windows 11 Center Taskbar (Frosted Acrylic blur)
+        # Windows 11 Center Taskbar (Frosted Acrylic)
         tb_r = L["taskbar_rect"]
-        pygame.draw.rect(self.surface, (240, 245, 252), tb_r)
-        pygame.draw.line(self.surface, (210, 220, 235), (tb_r.x, tb_r.y), (tb_r.x + tb_r.width, tb_r.y), 1)
+        pygame.draw.rect(self.surface, (244, 246, 250), tb_r)
+        pygame.draw.line(self.surface, (218, 224, 235), (tb_r.left, tb_r.top), (tb_r.right, tb_r.top), 1)
 
         # Taskbar Buttons
         icons = L["taskbar_icons"]
-
-        # Start
         self._draw_taskbar_button(icons["start"], (0, 120, 215), "WIN")
-        # Search
         self._draw_taskbar_button(icons["search"], (90, 100, 115), "SRC")
-        # Edge
         self._draw_taskbar_button(icons["browser"], (0, 120, 215), "WEB", is_active=(self.active_app == "browser"))
-        # PuTTY
         self._draw_taskbar_button(icons["putty"], (20, 50, 160), "PUT", is_active=(self.active_app == "putty"))
-        # Terminal
         self._draw_taskbar_button(icons["terminal"], (20, 20, 25), "CMD", is_active=(self.active_app == "terminal"))
-        # Settings
         self._draw_taskbar_button(icons["network_settings"], (70, 80, 95), "NET", is_active=(self.active_app == "network_settings"))
 
-        # System Tray (Time & Network)
-        cur_time = time.strftime("%H:%M")
-        t_surf = self.font_sm.render(cur_time, True, (30, 35, 45))
-        self.surface.blit(t_surf, (dx + dw - 65, tb_r.y + 14))
-        # Ethernet Connected Icon
+        # System Tray (Network, Sound, Battery, Time & Date)
         p = self.device.eth0
-        net_col = (10, 140, 50) if (p and p.is_link_up) else (180, 40, 40)
-        pygame.draw.rect(self.surface, net_col, (dx + dw - 95, tb_r.y + 16, 16, 12), border_radius=2)
+        is_up = bool(p and p.is_link_up)
+        self._draw_system_tray_icons(self.surface, dx + dw - 145, tb_r.y + 14, is_up=is_up, is_windows=True)
+
+        cur_time = time.strftime("%H:%M")
+        cur_date = time.strftime("%m/%d/%Y")
+        t_surf = self.font_sm.render(cur_time, True, (30, 35, 45))
+        d_surf = self.font_sm.render(cur_date, True, (90, 95, 105))
+        self.surface.blit(t_surf, (dx + dw - 75, tb_r.y + 6))
+        self.surface.blit(d_surf, (dx + dw - 75, tb_r.y + 22))
 
     def _render_ubuntu_desktop(self):
         L = self.layout
         dx, dy, dw, dh = L["dx"], L["dy"], L["dw"], L["dh"]
         mx, my = self.hover_pos
 
-        # Ubuntu 22.04 Aubergine / Jammy Gradient
-        for y in range(dh):
-            prog = y / float(dh)
-            r = int(45 + 30 * prog)
-            g = int(8 + 10 * prog)
-            b = int(40 - 15 * prog)
-            pygame.draw.line(self.surface, (r, g, b), (dx, dy + y), (dx + dw, dy + y))
-
-        # Jammy geometric orange accent
-        cx, cy = dx + dw // 2 + 80, dy + dh // 2
-        pygame.draw.polygon(self.surface, (233, 84, 32), [
-            (cx - 160, cy - 100), (cx + 120, cy - 150),
-            (cx + 180, cy + 80), (cx - 60, cy + 160)
-        ])
+        # Cache wallpaper surface for high-performance 60 FPS rendering
+        if self._wallpaper_surface is None or self._wallpaper_surface.get_size() != (dw, dh):
+            self._wallpaper_surface = self._generate_ubuntu_wallpaper(dw, dh)
+        self.surface.blit(self._wallpaper_surface, (dx, dy))
 
         # Top Bar (Ubuntu GNOME 42)
         top_r = L["topbar_rect"]
-        pygame.draw.rect(self.surface, (16, 16, 18), top_r)
+        pygame.draw.rect(self.surface, (18, 18, 22), top_r)
+        pygame.draw.line(self.surface, (35, 35, 42), (top_r.left, top_r.bottom), (top_r.right, top_r.bottom), 1)
 
         # Activities button
         act_r = L["activities_btn"]
         act_hover = act_r.collidepoint(mx, my)
         if act_hover:
-            pygame.draw.rect(self.surface, (45, 45, 50), act_r, border_radius=4)
-        act_surf = self.font_sm.render("Activities", True, (255, 255, 255) if act_hover else (220, 220, 220))
-        self.surface.blit(act_surf, (act_r.x + 8, act_r.y + 4))
+            pygame.draw.rect(self.surface, (45, 45, 52), act_r, border_radius=12)
+        act_surf = self.font_sm.render("Activities", True, (255, 255, 255) if act_hover else (220, 220, 225))
+        self.surface.blit(act_surf, (act_r.x + (act_r.width - act_surf.get_width()) // 2, act_r.y + 4))
 
         # Center Clock
         date_str = time.strftime("%b %d  %H:%M")
         c_surf = self.font_sm.render(date_str, True, (240, 240, 240))
-        self.surface.blit(c_surf, (dx + dw // 2 - 40, top_r.y + 6))
+        self.surface.blit(c_surf, (dx + dw // 2 - c_surf.get_width() // 2, top_r.y + 6))
 
-        # Right Cluster
+        # Right Status Cluster (Network, Speaker, Battery)
         p = self.device.eth0
-        net_col = (70, 210, 80) if (p and p.is_link_up) else (210, 70, 60)
-        pygame.draw.circle(self.surface, net_col, (dx + dw - 30, top_r.y + 14), 4)
+        is_up = bool(p and p.is_link_up)
+        self._draw_system_tray_icons(self.surface, dx + dw - 75, top_r.y + 6, is_up=is_up, is_windows=False)
 
         # Left Vertical Dock (Yaru Launcher)
         dock_r = L["dock_rect"]
-        pygame.draw.rect(self.surface, (18, 18, 20), dock_r)
-        pygame.draw.line(self.surface, (35, 35, 40), (dock_r.x + dock_r.width, dock_r.y), (dock_r.x + dock_r.width, dock_r.y + dock_r.height), 1)
+        pygame.draw.rect(self.surface, (20, 20, 24), dock_r)
+        pygame.draw.line(self.surface, (38, 38, 46), (dock_r.right, dock_r.top), (dock_r.right, dock_r.bottom), 1)
 
         d_icons = L["dock_icons"]
         self._draw_dock_button(d_icons["browser"], (233, 84, 32), "FOX", is_active=(self.active_app == "browser"))
@@ -704,61 +1079,98 @@ class LaptopGUI:
         self._draw_desktop_icon_box(L["desktop_icons"]["terminal"], "Terminal", (10, 10, 12), ">_")
 
     def _draw_desktop_icon_box(self, rect, label, col, tag):
-        """Draws desktop app icon with smooth hover selection box."""
+        """Draws desktop app icon with vector art and translucent pill label."""
         mx, my = self.hover_pos
         is_hover = rect.collidepoint(mx, my)
 
         if is_hover:
-            pygame.draw.rect(self.surface, (255, 255, 255, 45), rect, border_radius=6)
-            pygame.draw.rect(self.surface, (255, 255, 255, 90), rect, width=1, border_radius=6)
+            pygame.draw.rect(self.surface, (255, 255, 255, 35), rect, border_radius=8)
+            pygame.draw.rect(self.surface, (255, 255, 255, 80), rect, width=1, border_radius=8)
 
-        # Centered icon emblem
+        # Centered 40x40 icon emblem
         ic_rect = pygame.Rect(rect.x + (rect.width - 40) // 2, rect.y + 4, 40, 40)
-        pygame.draw.rect(self.surface, col, ic_rect, border_radius=8)
-        tag_s = self.font_sm.render(tag, True, (255, 255, 255))
-        self.surface.blit(tag_s, (ic_rect.x + (40 - tag_s.get_width()) // 2, ic_rect.y + 12))
+        # Drop shadow behind icon
+        pygame.draw.rect(self.surface, (0, 0, 0, 45), (ic_rect.x, ic_rect.y + 2, 40, 40), border_radius=8)
 
-        # Text label
+        tag_upper = str(tag).upper()
+        lbl_lower = str(label).lower()
+        if tag_upper == "FOX" or "firefox" in lbl_lower:
+            self._draw_vector_firefox(self.surface, ic_rect)
+        elif tag_upper == "WEB" or "edge" in lbl_lower:
+            self._draw_vector_edge(self.surface, ic_rect)
+        elif tag_upper in ("NET", "SET") or "setting" in lbl_lower:
+            self._draw_vector_settings(self.surface, ic_rect)
+        elif tag_upper in ("PUT", "COM", "SER") or "putty" in lbl_lower or "minicom" in lbl_lower:
+            self._draw_vector_putty(self.surface, ic_rect)
+        elif tag_upper in ("CMD", ">_") or "terminal" in lbl_lower:
+            self._draw_vector_terminal(self.surface, ic_rect, is_windows=self.is_windows)
+        else:
+            pygame.draw.rect(self.surface, col, ic_rect, border_radius=8)
+            tag_s = self.font_sm.render(tag, True, (255, 255, 255))
+            self.surface.blit(tag_s, (ic_rect.x + (40 - tag_s.get_width()) // 2, ic_rect.y + 12))
+
+        # Translucent pill label
         lbl_s = self.font_sm.render(label, True, (255, 255, 255))
-        self.surface.blit(lbl_s, (rect.x + (rect.width - lbl_s.get_width()) // 2, rect.y + 48))
+        lw = lbl_s.get_width() + 10
+        lh = lbl_s.get_height() + 4
+        lbl_rect = pygame.Rect(rect.centerx - lw // 2, rect.y + 48, lw, lh)
+        pygame.draw.rect(self.surface, (15, 18, 24, 160), lbl_rect, border_radius=4)
+        self.surface.blit(lbl_s, (lbl_rect.x + 5, lbl_rect.y + 2))
 
     def _draw_taskbar_button(self, rect, col, tag, is_active=False):
-        """Draws a taskbar icon button with hover and active app pill indicator."""
+        """Draws a Windows 11 taskbar button with vector art and active indicator pill."""
         mx, my = self.hover_pos
         is_hover = rect.collidepoint(mx, my)
 
         if is_hover:
-            pygame.draw.rect(self.surface, (220, 230, 245), rect, border_radius=4)
+            pygame.draw.rect(self.surface, (230, 236, 245), rect, border_radius=4)
 
-        ic_x = rect.x + (rect.width - 22) // 2
-        ic_y = rect.y + (rect.height - 22) // 2
-        if tag == "WIN":
-            pygame.draw.rect(self.surface, col, (ic_x, ic_y, 22, 22), border_radius=3)
-        elif tag == "SRC":
-            pygame.draw.circle(self.surface, col, (rect.centerx, rect.centery), 9, 2)
+        ic_rect = pygame.Rect(rect.x + (rect.width - 24) // 2, rect.y + (rect.height - 24) // 2, 24, 24)
+        tag_upper = str(tag).upper()
+
+        if tag_upper == "WIN":
+            self._draw_vector_start(self.surface, ic_rect)
+        elif tag_upper == "SRC":
+            self._draw_vector_search(self.surface, ic_rect)
+        elif tag_upper == "WEB":
+            self._draw_vector_edge(self.surface, ic_rect)
+        elif tag_upper in ("PUT", "SER", "COM"):
+            self._draw_vector_putty(self.surface, ic_rect)
+        elif tag_upper in ("CMD", ">_"):
+            self._draw_vector_terminal(self.surface, ic_rect, is_windows=True)
+        elif tag_upper in ("NET", "SET"):
+            self._draw_vector_settings(self.surface, ic_rect)
         else:
-            pygame.draw.rect(self.surface, col, (ic_x, ic_y, 22, 22), border_radius=4)
-            tag_s = self.font_sm.render(tag[:2], True, (255, 255, 255))
-            self.surface.blit(tag_s, (ic_x + 3, ic_y + 4))
+            pygame.draw.rect(self.surface, col, ic_rect, border_radius=4)
 
-        # Active indicator pill at bottom
+        # Windows 11 Active Indicator Pill
         if is_active:
-            pygame.draw.rect(self.surface, (0, 120, 215), (rect.x + 8, rect.bottom - 3, rect.width - 16, 2), border_radius=1)
+            pygame.draw.rect(self.surface, (0, 103, 192), (rect.x + 8, rect.bottom - 3, rect.width - 16, 3), border_radius=2)
 
     def _draw_dock_button(self, rect, col, tag, is_active=False):
-        """Draws an Ubuntu dock button with hover and orange active dot indicator."""
+        """Draws an Ubuntu dock button with vector art and orange indicator pip."""
         mx, my = self.hover_pos
         is_hover = rect.collidepoint(mx, my)
 
         if is_hover:
-            pygame.draw.rect(self.surface, (45, 45, 50), rect, border_radius=8)
+            pygame.draw.rect(self.surface, (45, 45, 52), rect, border_radius=8)
 
-        pygame.draw.rect(self.surface, col, (rect.x + 2, rect.y + 2, 36, 36), border_radius=7)
-        tag_s = self.font_sm.render(tag, True, (255, 255, 255))
-        self.surface.blit(tag_s, (rect.x + 6, rect.y + 11))
+        ic_rect = pygame.Rect(rect.x + 2, rect.y + 2, 36, 36)
+        tag_upper = str(tag).upper()
 
+        if tag_upper in ("FOX", "WEB"):
+            self._draw_vector_firefox(self.surface, ic_rect)
+        elif tag_upper in ("COM", "PUT", "SER"):
+            self._draw_vector_putty(self.surface, ic_rect)
+        elif tag_upper in (">_", "CMD"):
+            self._draw_vector_terminal(self.surface, ic_rect, is_windows=False)
+        elif tag_upper in ("NET", "SET"):
+            self._draw_vector_settings(self.surface, ic_rect)
+        else:
+            pygame.draw.rect(self.surface, col, ic_rect, border_radius=7)
+
+        # Ubuntu Active Indicator Pip
         if is_active:
-            # Orange indicator pip on left
             pygame.draw.rect(self.surface, (233, 84, 32), (rect.x - 5, rect.y + 14, 3, 12), border_radius=1)
 
     def _render_window_frame(self, title_text, title_col=(30, 45, 60), bar_bg=(235, 242, 250)):
@@ -767,21 +1179,62 @@ class LaptopGUI:
         C = self.layout["window_close_btn"]
         mx, my = self.hover_pos
 
-        # Window Box & Border
-        pygame.draw.rect(self.surface, (252, 253, 255), W, border_radius=8)
-        pygame.draw.rect(self.surface, (0, 115, 230), W, width=2, border_radius=8)
+        # Window Drop Shadow
+        shadow_surf = pygame.Surface((W.width + 16, W.height + 16), pygame.SRCALPHA)
+        pygame.draw.rect(shadow_surf, (0, 0, 0, 20), (0, 0, W.width + 16, W.height + 16), border_radius=12)
+        pygame.draw.rect(shadow_surf, (0, 0, 0, 40), (3, 3, W.width + 10, W.height + 10), border_radius=10)
+        self.surface.blit(shadow_surf, (W.x - 8, W.y - 6))
 
-        # Title Bar
-        pygame.draw.rect(self.surface, bar_bg, (W.x, W.y, W.width, 32), border_top_left_radius=8, border_top_right_radius=8)
-        t_surf = self.font_md.render(title_text, True, title_col)
-        self.surface.blit(t_surf, (W.x + 14, W.y + 7))
+        if self.is_windows:
+            # Windows 11 Fluent Window Chassis
+            pygame.draw.rect(self.surface, (255, 255, 255), W, border_radius=8)
+            pygame.draw.rect(self.surface, (218, 224, 235), W, width=1, border_radius=8)
 
-        # Close [X] Button with hover effect
-        is_close_hover = C.collidepoint(mx, my)
-        c_bg = (235, 40, 40) if is_close_hover else (220, 60, 60)
-        pygame.draw.rect(self.surface, c_bg, C, border_radius=3)
-        x_s = self.font_sm.render("X", True, (255, 255, 255))
-        self.surface.blit(x_s, (C.x + (C.width - x_s.get_width()) // 2, C.y + (C.height - x_s.get_height()) // 2))
+            # Title Bar
+            pygame.draw.rect(self.surface, bar_bg, (W.x, W.y, W.width, 32), border_top_left_radius=8, border_top_right_radius=8)
+            pygame.draw.line(self.surface, (220, 226, 236), (W.x, W.y + 32), (W.right, W.y + 32), 1)
+
+            t_surf = self.font_md.render(title_text, True, title_col)
+            self.surface.blit(t_surf, (W.x + 16, W.y + 7))
+
+            # Controls: Minimize, Maximize
+            pygame.draw.line(self.surface, (90, 100, 115), (W.right - 76, W.y + 16), (W.right - 66, W.y + 16), 1)
+            pygame.draw.rect(self.surface, (90, 100, 115), (W.right - 54, W.y + 11, 10, 10), width=1)
+
+            # Close Button
+            is_close_hover = C.collidepoint(mx, my)
+            c_bg = (232, 17, 35) if is_close_hover else bar_bg
+            pygame.draw.rect(self.surface, c_bg, C, border_top_right_radius=7)
+            x_col = (255, 255, 255) if is_close_hover else (60, 70, 85)
+            cx, cy = C.centerx, C.centery
+            pygame.draw.line(self.surface, x_col, (cx - 4, cy - 4), (cx + 4, cy + 4), 1)
+            pygame.draw.line(self.surface, x_col, (cx - 4, cy + 4), (cx + 4, cy - 4), 1)
+        else:
+            # Ubuntu Yaru Window Chassis
+            pygame.draw.rect(self.surface, (250, 250, 252), W, border_radius=8)
+            pygame.draw.rect(self.surface, (45, 45, 52), W, width=1, border_radius=8)
+
+            u_bar_bg = (38, 38, 44) if bar_bg == (235, 242, 250) else bar_bg
+            u_title_col = (240, 240, 245) if title_col == (30, 45, 60) else title_col
+            pygame.draw.rect(self.surface, u_bar_bg, (W.x, W.y, W.width, 32), border_top_left_radius=8, border_top_right_radius=8)
+            pygame.draw.line(self.surface, (55, 55, 62), (W.x, W.y + 32), (W.right, W.y + 32), 1)
+
+            t_surf = self.font_md.render(title_text, True, u_title_col)
+            self.surface.blit(t_surf, (W.x + 16, W.y + 7))
+
+            # Controls: Minimize, Maximize
+            pygame.draw.circle(self.surface, (55, 55, 62), (W.right - 68, W.y + 16), 8)
+            pygame.draw.line(self.surface, (180, 180, 190), (W.right - 72, W.y + 16), (W.right - 64, W.y + 16), 1)
+            pygame.draw.circle(self.surface, (55, 55, 62), (W.right - 46, W.y + 16), 8)
+            pygame.draw.rect(self.surface, (180, 180, 190), (W.right - 49, W.y + 13, 6, 6), width=1)
+
+            # Close Button
+            is_close_hover = C.collidepoint(mx, my)
+            c_bg = (235, 65, 45) if is_close_hover else (220, 80, 60)
+            pygame.draw.circle(self.surface, c_bg, (C.centerx, C.centery), 9)
+            cx, cy = C.centerx, C.centery
+            pygame.draw.line(self.surface, (255, 255, 255), (cx - 3, cy - 3), (cx + 3, cy + 3), 1)
+            pygame.draw.line(self.surface, (255, 255, 255), (cx - 3, cy + 3), (cx + 3, cy - 3), 1)
 
     def _render_browser_window(self):
         B = self.layout["browser"]

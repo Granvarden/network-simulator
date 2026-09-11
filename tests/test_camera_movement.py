@@ -85,7 +85,74 @@ def test_camera_direction():
 
     print("\nALL CAMERA & MOVEMENT DIRECTION TESTS PASSED 100%!")
 
+def test_camera_collision():
+    cam = FPSCamera(pos=(0.0, 1.65, 2.0))
+
+    # 1. Verify previously blocked empty areas are now open
+    # Open area between Rack 1 and Rack 2 (x = -0.7, z = -1.5)
+    assert not cam._is_colliding(-0.7, -1.5), "Gap between rack 1 and rack 2 should be walkable"
+
+    # Open area between Rack 2 and Rack 3 (x = 0.7, z = -1.5)
+    assert not cam._is_colliding(0.7, -1.5), "Gap between rack 2 and rack 3 should be walkable"
+
+    # Open floor to the left of Rack 1 (x = -2.2, z = -1.5)
+    assert not cam._is_colliding(-2.2, -1.5), "Area to left of Rack 1 should be walkable"
+
+    # Open floor to the right of Rack 3 (x = 2.2, z = -1.5)
+    assert not cam._is_colliding(2.2, -1.5), "Area to right of Rack 3 should be walkable"
+
+    # Open hot aisle behind racks (x = 0.0, z = -2.2)
+    assert not cam._is_colliding(0.0, -2.2), "Hot aisle behind racks should be walkable"
+
+    # Open floor close in front of racks (x = 0.0, z = -0.85)
+    assert not cam._is_colliding(0.0, -0.85), "Front cold aisle should be walkable close to rack ports"
+
+    # Open floor near room perimeter walls (x = -5.0, z = 0.0)
+    assert not cam._is_colliding(-5.0, 0.0), "Floor near perimeter wall should be walkable"
+
+    print("Verified: All previously blocked empty open spaces are now walkable! [PASS]")
+
+    # 2. Verify actual solid obstacles are properly blocked
+    # Inside Rack 1
+    assert cam._is_colliding(-1.4, -1.5), "Inside Rack 1 must collide"
+    # Inside Rack 2
+    assert cam._is_colliding(0.0, -1.5), "Inside Rack 2 must collide"
+    # Inside Rack 3
+    assert cam._is_colliding(1.4, -1.5), "Inside Rack 3 must collide"
+    # Inside Workbench Desk
+    assert cam._is_colliding(-3.2, 0.5), "Inside Workbench desk must collide"
+    # Beyond room perimeter wall
+    assert cam._is_colliding(-5.6, 0.0), "At perimeter wall boundary must collide"
+    assert cam._is_colliding(6.0, 0.0), "Outside room boundary must collide"
+
+    print("Verified: Real physical obstacles remain solid and blocked! [PASS]")
+
+    # 3. Verify axis-independent sliding collision
+    # Position player against front of rack 2 (x=0, z=-0.88, facing -Z)
+    cam.x = 0.0
+    cam.z = -0.88
+    cam.yaw = 0.0
+
+    class DummyKeys:
+        def __init__(self, *active_keys):
+            self.keys = set(active_keys)
+        def __getitem__(self, k):
+            return k in self.keys
+
+    # Walking diagonally forward-right (W + D):
+    # Moving forward into rack should be blocked, but strafing right should succeed!
+    init_x = cam.x
+    init_z = cam.z
+    cam.update(DummyKeys(pygame.K_w, pygame.K_d), dt=0.05, pygame_module=pygame)
+    assert cam.x > init_x, "Player should slide right along the rack face"
+    assert cam.z == init_z, "Player forward movement into the rack should be stopped"
+    print(f"Smooth sliding: X slid from {init_x:.2f} to {cam.x:.2f} while Z stayed at {init_z:.2f}. [PASS]")
+
+    print("\nALL CAMERA COLLISION & SLIDING TESTS PASSED 100%!")
+
 if __name__ == "__main__":
     pygame.init()
     test_camera_direction()
+    test_camera_collision()
     pygame.quit()
+
