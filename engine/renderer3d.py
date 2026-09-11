@@ -169,9 +169,10 @@ class Renderer3D:
                 x1, z1 = x0 + tile_size, z0 + tile_size
 
                 # Check if this tile is in the Cold Aisle directly in front of the racks
-                in_cold_aisle = (-2.1 <= x0 <= 1.8) and (-1.2 <= z0 <= -0.4)
+                # Symmetrically 7 tiles wide (-2.1 to +2.1, centered at x = 0.0)
+                in_cold_aisle = (-2.1 <= x0 < 2.1) and (-1.2 <= z0 < -0.3)
                 if in_cold_aisle:
-                    glColor3f(0.68, 0.72, 0.78)
+                    glColor3f(0.70, 0.74, 0.80)
                 elif (x + z) % 2 == 0:
                     glColor3f(0.89, 0.91, 0.95)
                 else:
@@ -183,28 +184,58 @@ class Renderer3D:
                 glVertex3f(x0, 0.0, z1)
         glEnd()
 
-        # 2. Perforated Ventilation Grilles in Cold Aisle (Base & honeycomb slats)
+        # 2. Centered ESD Anti-Static Rubber Floor Runner Mat & Precision Airflow Grilles
+        # Continuous runner mat centered at x = 0.0 spanning across all 3 racks (-2.05 to +2.05)
+        # Sits flush in front of the rack doors from z = -1.14 to z = -0.50 (centered at z = -0.82)
+        mat_x0, mat_x1 = -2.05, 2.05
+        mat_z0, mat_z1 = -1.14, -0.50
+
+        # Beveled Safety Yellow ESD Edge Border Trim
+        glBegin(GL_QUADS)
+        glColor3f(0.92, 0.78, 0.10)
+        glVertex3f(mat_x0 - 0.025, 0.0015, mat_z0 - 0.02)
+        glVertex3f(mat_x1 + 0.025, 0.0015, mat_z0 - 0.02)
+        glVertex3f(mat_x1 + 0.025, 0.0015, mat_z1 + 0.02)
+        glVertex3f(mat_x0 - 0.025, 0.0015, mat_z1 + 0.02)
+
+        # Charcoal Heavy-Duty ESD Anti-Static Mat Surface
+        glColor3f(0.18, 0.20, 0.24)
+        glVertex3f(mat_x0, 0.0022, mat_z0)
+        glVertex3f(mat_x1, 0.0022, mat_z0)
+        glVertex3f(mat_x1, 0.0022, mat_z1)
+        glVertex3f(mat_x0, 0.0022, mat_z1)
+        glEnd()
+
+        # Mat Corner Earth Grounding Rivet Studs & Green Ground Wire
+        for gx in [mat_x0 + 0.04, mat_x1 - 0.04]:
+            self._draw_box(gx, 0.003, mat_z0 + 0.04, 0.016, 0.004, 0.016, (0.85, 0.75, 0.22))
+            self._draw_box(gx, 0.003, mat_z0 - 0.01, 0.004, 0.004, 0.06, (0.15, 0.75, 0.25))
+
+        # Precision Perforated Airflow Grilles Centered directly in front of each rack door (rx = -1.4, 0.0, 1.4)
         glLineWidth(1.5)
         for rx in [-1.4, 0.0, 1.4]:
-            vx0, vz0 = rx - 0.28, -0.95
-            vx1, vz1 = rx + 0.28, -0.45
+            vx0, vz0 = rx - 0.26, -1.10
+            vx1, vz1 = rx + 0.26, -0.56
 
             # Dark plenum recess underneath
             glBegin(GL_QUADS)
-            glColor4f(0.12, 0.18, 0.26, 0.9)
-            glVertex3f(vx0, 0.002, vz0)
-            glVertex3f(vx1, 0.002, vz0)
-            glVertex3f(vx1, 0.002, vz1)
-            glVertex3f(vx0, 0.002, vz1)
+            glColor4f(0.08, 0.10, 0.14, 0.95)
+            glVertex3f(vx0, 0.003, vz0)
+            glVertex3f(vx1, 0.003, vz0)
+            glVertex3f(vx1, 0.003, vz1)
+            glVertex3f(vx0, 0.003, vz1)
             glEnd()
 
-            # Metal honeycomb / slotted air grille bars
-            glColor3f(0.45, 0.50, 0.58)
+            # Galvanized metal honeycomb airflow slats
+            glColor3f(0.48, 0.52, 0.60)
             glBegin(GL_LINES)
-            for s in range(7):
-                sz = vz0 + (s / 6.0) * (vz1 - vz0)
-                glVertex3f(vx0 + 0.02, 0.003, sz)
-                glVertex3f(vx1 - 0.02, 0.003, sz)
+            for s in range(9):
+                sz = vz0 + (s / 8.0) * (vz1 - vz0)
+                glVertex3f(vx0 + 0.015, 0.004, sz)
+                glVertex3f(vx1 - 0.015, 0.004, sz)
+            # Center structural spine
+            glVertex3f(rx, 0.0045, vz0)
+            glVertex3f(rx, 0.0045, vz1)
             glEnd()
 
         # Floor grid line seams
@@ -246,19 +277,13 @@ class Renderer3D:
         glVertex3f(6.0, ch, -6.0)
         glVertex3f(-6.0, ch, -6.0)
 
-        # Enterprise Corporate Blue Feature Wall Stripe
-        glColor4f(0.0, 0.45, 0.85, 0.95)
-        glVertex3f(-6.0, 1.25, -5.99)
-        glVertex3f(6.0, 1.25, -5.99)
-        glVertex3f(6.0, 1.35, -5.99)
-        glVertex3f(-6.0, 1.35, -5.99)
-
-        # Dark Slate Baseboard
-        glColor3f(0.20, 0.23, 0.28)
-        glVertex3f(-6.0, 0.0, -5.99)
-        glVertex3f(6.0, 0.0, -5.99)
-        glVertex3f(6.0, 0.12, -5.99)
-        glVertex3f(-6.0, 0.12, -5.99)
+        # Front Wall facing racks (Z = 6.0)
+        glColor3f(0.86, 0.89, 0.93)
+        glVertex3f(6.0, 0.0, 6.0)
+        glVertex3f(-6.0, 0.0, 6.0)
+        glColor3f(0.91, 0.93, 0.96)
+        glVertex3f(-6.0, ch, 6.0)
+        glVertex3f(6.0, ch, 6.0)
 
         # Left Wall (X = -6.0)
         glColor3f(0.84, 0.87, 0.91)
@@ -273,6 +298,36 @@ class Renderer3D:
         glVertex3f(6.0, 0.0, 6.0)
         glVertex3f(6.0, ch, 6.0)
         glVertex3f(6.0, ch, -6.0)
+
+        # Enterprise Corporate Blue Feature Wall Stripe around all 4 perimeter walls (Y = 1.25 to 1.35)
+        glColor4f(0.0, 0.45, 0.85, 0.95)
+        # Back Wall (Z = -5.99)
+        glVertex3f(-6.0, 1.25, -5.99); glVertex3f(6.0, 1.25, -5.99)
+        glVertex3f(6.0, 1.35, -5.99); glVertex3f(-6.0, 1.35, -5.99)
+        # Front Wall (Z = 5.99)
+        glVertex3f(6.0, 1.25, 5.99); glVertex3f(-6.0, 1.25, 5.99)
+        glVertex3f(-6.0, 1.35, 5.99); glVertex3f(6.0, 1.35, 5.99)
+        # Left Wall (X = -5.99)
+        glVertex3f(-5.99, 1.25, 6.0); glVertex3f(-5.99, 1.25, -6.0)
+        glVertex3f(-5.99, 1.35, -6.0); glVertex3f(-5.99, 1.35, 6.0)
+        # Right Wall (X = 5.99)
+        glVertex3f(5.99, 1.25, -6.0); glVertex3f(5.99, 1.25, 6.0)
+        glVertex3f(5.99, 1.35, 6.0); glVertex3f(5.99, 1.35, -6.0)
+
+        # Dark Slate Baseboard (Y = 0.0 to 0.12) around all 4 perimeter walls
+        glColor3f(0.20, 0.23, 0.28)
+        # Back Wall
+        glVertex3f(-6.0, 0.0, -5.99); glVertex3f(6.0, 0.0, -5.99)
+        glVertex3f(6.0, 0.12, -5.99); glVertex3f(-6.0, 0.12, -5.99)
+        # Front Wall
+        glVertex3f(6.0, 0.0, 5.99); glVertex3f(-6.0, 0.0, 5.99)
+        glVertex3f(-6.0, 0.12, 5.99); glVertex3f(6.0, 0.12, 5.99)
+        # Left Wall
+        glVertex3f(-5.99, 0.0, 6.0); glVertex3f(-5.99, 0.0, -6.0)
+        glVertex3f(-5.99, 0.12, -6.0); glVertex3f(-5.99, 0.12, 6.0)
+        # Right Wall
+        glVertex3f(5.99, 0.0, -6.0); glVertex3f(5.99, 0.0, 6.0)
+        glVertex3f(5.99, 0.12, 6.0); glVertex3f(5.99, 0.12, -6.0)
         glEnd()
 
         # 5. Wall Fixtures: EPO (Emergency Power Off) Button & Keycard Reader Body
@@ -459,6 +514,262 @@ class Renderer3D:
                 glVertex3f(4.20, 0.002, cz + 0.08)
                 glEnd()
 
+        # 14. Left Wall Datacenter Infrastructure & Tool Station (X = -5.98, Z = 2.0 to 5.7)
+        # A. Architectural Datacenter Floorplan & Rack Layout Blueprint (Z = 2.45)
+        self._draw_box(-5.98, 1.65, 2.45, 0.02, 1.15, 1.45, (0.68, 0.72, 0.78))
+        self._draw_box(-5.96, 1.65, 2.45, 0.01, 1.08, 1.38, (0.05, 0.18, 0.38))
+        self._draw_box(-5.95, 2.08, 2.45, 0.005, 0.08, 1.30, (0.02, 0.12, 0.28))
+        # 4 Standoff mounts
+        for cz in [1.85, 3.05]:
+            for cy in [1.16, 2.14]:
+                self._draw_box(-5.94, cy, cz, 0.025, 0.035, 0.035, (0.85, 0.88, 0.92))
+        # Blueprint grid and layout markings
+        glColor3f(0.20, 0.55, 0.85)
+        glLineWidth(1.0)
+        glBegin(GL_LINES)
+        for bz in range(7):
+            gz = 1.95 + bz * 0.16
+            glVertex3f(-5.945, 1.25, gz); glVertex3f(-5.945, 2.00, gz)
+        for by in range(5):
+            gy = 1.25 + by * 0.18
+            glVertex3f(-5.945, gy, 1.95); glVertex3f(-5.945, gy, 2.95)
+        # Rack footprint boxes in blueprint
+        glColor3f(0.85, 0.95, 1.0)
+        for r_bx in [2.20, 2.45, 2.70]:
+            glVertex3f(-5.94, 1.50, r_bx - 0.08); glVertex3f(-5.94, 1.50, r_bx + 0.08)
+            glVertex3f(-5.94, 1.50, r_bx + 0.08); glVertex3f(-5.94, 1.75, r_bx + 0.08)
+            glVertex3f(-5.94, 1.75, r_bx + 0.08); glVertex3f(-5.94, 1.75, r_bx - 0.08)
+            glVertex3f(-5.94, 1.75, r_bx - 0.08); glVertex3f(-5.94, 1.50, r_bx - 0.08)
+        glEnd()
+
+        # B. 6U Wall-Mount Fiber Optic Distribution & Patching Enclosure (ODF) (Z = 3.55)
+        self._draw_box(-5.88, 1.70, 3.55, 0.22, 0.44, 0.58, (0.16, 0.18, 0.22))
+        self._draw_box(-5.76, 1.70, 3.55, 0.01, 0.38, 0.52, (0.10, 0.22, 0.32))
+        self._draw_box(-5.75, 1.70, 3.76, 0.02, 0.05, 0.025, (0.75, 0.78, 0.82))
+        # Interior fiber adapter panels: OM4 Aqua & OS2 Single-mode Blue
+        self._draw_box(-5.84, 1.78, 3.55, 0.04, 0.07, 0.44, (0.08, 0.10, 0.12))
+        self._draw_box(-5.84, 1.62, 3.55, 0.04, 0.07, 0.44, (0.08, 0.10, 0.12))
+        for ci in range(8):
+            fz = 3.38 + ci * 0.048
+            self._draw_box(-5.82, 1.78, fz, 0.015, 0.03, 0.032, (0.15, 0.80, 0.82))
+            self._draw_box(-5.82, 1.62, fz, 0.015, 0.03, 0.032, (0.10, 0.45, 0.95))
+        # Laser Caution warning label
+        self._draw_box(-5.75, 1.84, 3.36, 0.005, 0.05, 0.05, (0.95, 0.85, 0.05))
+
+        # C. Network Field Operations Tool Pegboard & Equipment Station (Z = 4.65)
+        self._draw_box(-5.97, 1.55, 4.65, 0.02, 1.10, 1.25, (0.32, 0.35, 0.40))
+        self._draw_box(-5.96, 1.55, 4.65, 0.015, 1.14, 1.29, (0.65, 0.68, 0.74))
+        # Pegboard holes pattern
+        glColor3f(0.18, 0.20, 0.24)
+        glPointSize(2.0)
+        glBegin(GL_POINTS)
+        for py_i in range(8):
+            for pz_i in range(12):
+                glVertex3f(-5.955, 1.10 + py_i * 0.12, 4.15 + pz_i * 0.09)
+        glEnd()
+
+        # Fluke Networks DSX Cable Certifier & Tester
+        self._draw_box(-5.93, 1.75, 4.38, 0.04, 0.28, 0.16, (0.95, 0.82, 0.08))
+        self._draw_box(-5.91, 1.75, 4.38, 0.02, 0.25, 0.14, (0.18, 0.20, 0.24))
+        self._draw_box(-5.90, 1.80, 4.38, 0.005, 0.11, 0.11, (0.10, 0.55, 0.85))
+        self._draw_box(-5.895, 1.80, 4.38, 0.002, 0.04, 0.07, (0.15, 0.92, 0.35))
+        self._draw_box(-5.90, 1.68, 4.38, 0.005, 0.06, 0.10, (0.35, 0.38, 0.42))
+
+        # Dual Cable Spool Dispenser (Blue Cat6 + Yellow Single-mode Fiber)
+        self._draw_box(-5.88, 1.32, 4.45, 0.16, 0.04, 0.48, (0.25, 0.28, 0.32))
+        # Blue Cat6 spool
+        self._draw_box(-5.88, 1.32, 4.28, 0.18, 0.24, 0.02, (0.62, 0.48, 0.32))
+        self._draw_box(-5.88, 1.32, 4.42, 0.18, 0.24, 0.02, (0.62, 0.48, 0.32))
+        self._draw_box(-5.88, 1.32, 4.35, 0.15, 0.20, 0.12, (0.05, 0.42, 0.92))
+        # Yellow Fiber spool
+        self._draw_box(-5.88, 1.32, 4.54, 0.18, 0.24, 0.02, (0.62, 0.48, 0.32))
+        self._draw_box(-5.88, 1.32, 4.68, 0.18, 0.24, 0.02, (0.62, 0.48, 0.32))
+        self._draw_box(-5.88, 1.32, 4.61, 0.15, 0.20, 0.12, (0.95, 0.85, 0.12))
+
+        # Hand tools (Crimper & Punch-down tool)
+        self._draw_box(-5.93, 1.76, 4.72, 0.02, 0.22, 0.06, (0.95, 0.42, 0.05))
+        self._draw_box(-5.93, 1.76, 4.86, 0.02, 0.18, 0.04, (0.92, 0.80, 0.10))
+        # Parts storage bin with RJ45 jacks
+        self._draw_box(-5.92, 1.52, 4.82, 0.06, 0.14, 0.28, (0.75, 0.80, 0.86))
+        for bi in range(4):
+            self._draw_box(-5.90, 1.52, 4.72 + bi * 0.065, 0.04, 0.08, 0.05, (0.15 + bi * 0.2, 0.50, 0.85 - bi * 0.15))
+
+        # D. Health, Safety & ISO Certification Station (Z = 5.50)
+        self._draw_box(-5.96, 1.55, 5.50, 0.06, 0.45, 0.36, (0.94, 0.95, 0.96))
+        self._draw_box(-5.92, 1.55, 5.50, 0.01, 0.18, 0.06, (0.10, 0.75, 0.30))
+        self._draw_box(-5.92, 1.55, 5.50, 0.01, 0.06, 0.18, (0.10, 0.75, 0.30))
+        # Emergency Eyewash Station
+        self._draw_box(-5.88, 1.05, 5.50, 0.20, 0.16, 0.26, (0.15, 0.75, 0.30))
+        self._draw_box(-5.88, 1.15, 5.45, 0.04, 0.04, 0.04, (0.95, 0.85, 0.10))
+        self._draw_box(-5.88, 1.15, 5.55, 0.04, 0.04, 0.04, (0.95, 0.85, 0.10))
+        # Tier-IV ISO 27001 Certification plaque
+        self._draw_box(-5.97, 1.95, 5.50, 0.015, 0.28, 0.36, (0.22, 0.24, 0.28))
+        self._draw_box(-5.96, 1.95, 5.50, 0.005, 0.24, 0.32, (0.92, 0.90, 0.82))
+        self._draw_box(-5.95, 1.88, 5.60, 0.002, 0.05, 0.05, (0.85, 0.72, 0.20))
+
+        # 15. Front Wall NOC Command Center, Video Wall & Airlock (Z = 6.0)
+        # Note: Wall is at Z = 6.0. Room interior is at smaller Z (facing -Z towards camera).
+        # A. NOC Command Center Panoramic Glass Observation Window (X = 0.90, Y = 1.65)
+        # 1. Dark titanium outer window frame surround (4 border pieces)
+        self._draw_box(0.90, 2.41, 5.93, 3.24, 0.07, 0.05, (0.18, 0.20, 0.25))  # Top
+        self._draw_box(0.90, 0.89, 5.93, 3.24, 0.07, 0.05, (0.18, 0.20, 0.25))  # Bottom
+        self._draw_box(-0.68, 1.65, 5.93, 0.08, 1.55, 0.05, (0.18, 0.20, 0.25)) # Left
+        self._draw_box(2.48, 1.65, 5.93, 0.08, 1.55, 0.05, (0.18, 0.20, 0.25))  # Right
+        self._draw_box(0.90, 1.65, 5.92, 0.06, 1.45, 0.04, (0.22, 0.25, 0.30))  # Center vertical mullion
+
+        # 2. Command Center interior room backdrop (Deep high-tech twilight navy)
+        self._draw_box(0.90, 1.65, 5.97, 3.08, 1.45, 0.01, (0.04, 0.08, 0.18))
+
+        # 3. Inside NOC: Global Backbone Fiber World Map Screen (Z = 5.96)
+        self._draw_box(0.90, 1.82, 5.96, 2.92, 0.92, 0.005, (0.02, 0.05, 0.12))
+
+        # Continents and Network Backbone Arcs
+        continents = [
+            (-0.35, 1.95, 0.28, 0.18),  # North America
+            (-0.25, 1.55, 0.16, 0.22),  # South America
+            (0.30, 2.05, 0.22, 0.16),   # Europe
+            (0.35, 1.60, 0.22, 0.24),   # Africa
+            (1.45, 1.95, 0.55, 0.26),   # Asia
+            (1.90, 1.35, 0.22, 0.14),   # Australia
+        ]
+        for cx_c, cy_c, cw_c, ch_c in continents:
+            self._draw_box(cx_c, cy_c, 5.958, cw_c, ch_c, 0.002, (0.06, 0.22, 0.45))
+
+        glColor3f(0.0, 0.82, 1.0)
+        glLineWidth(2.0)
+        glBegin(GL_LINES)
+        hub_coords = [
+            (-0.35, 1.95),  # Americas
+            (0.30, 2.05),   # Europe
+            (0.95, 1.85),   # Middle East
+            (1.55, 1.95),   # Asia / Bangkok
+            (2.05, 1.70),   # East Asia / Pacific
+            (1.90, 1.35),   # Australia
+        ]
+        for i in range(len(hub_coords) - 1):
+            h1, h2 = hub_coords[i], hub_coords[i + 1]
+            glVertex3f(h1[0], h1[1], 5.955); glVertex3f(h2[0], h2[1], 5.955)
+        # Trans-pacific link
+        glVertex3f(-0.35, 1.95, 5.955); glVertex3f(2.05, 1.70, 5.955)
+        # Trans-atlantic link
+        glVertex3f(-0.35, 1.95, 5.955); glVertex3f(0.30, 2.05, 5.955)
+        glEnd()
+
+        # Glowing neon data hubs
+        for hx, hy in hub_coords:
+            self._draw_box(hx, hy, 5.952, 0.045, 0.045, 0.004, (0.15, 0.98, 0.70))
+
+        # NOC Telemetry Wall Displays inside command center
+        self._draw_box(0.05, 1.46, 5.955, 0.68, 0.18, 0.004, (0.0, 0.45, 0.80))
+        self._draw_box(1.75, 1.46, 5.955, 0.68, 0.18, 0.004, (0.05, 0.65, 0.40))
+
+        # NOC Operator Workstations Silhouettes (Desks & dual glowing curved monitors)
+        for desk_x in [0.15, 1.65]:
+            self._draw_box(desk_x, 1.06, 5.95, 0.80, 0.26, 0.015, (0.08, 0.10, 0.14))
+            self._draw_box(desk_x - 0.16, 1.25, 5.945, 0.24, 0.14, 0.005, (0.0, 0.75, 0.95))
+            self._draw_box(desk_x + 0.16, 1.25, 5.945, 0.24, 0.14, 0.005, (0.10, 0.85, 0.40))
+
+        # 4. Architectural Observation Glass with High-Tech Cyan Tint & Light Sheen
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glBegin(GL_QUADS)
+        glColor4f(0.08, 0.35, 0.65, 0.15)
+        glVertex3f(-0.64, 0.92, 5.925); glVertex3f(2.44, 0.92, 5.925)
+        glVertex3f(2.44, 2.38, 5.925); glVertex3f(-0.64, 2.38, 5.925)
+        # Reflection highlight streak
+        glColor4f(1.0, 1.0, 1.0, 0.15)
+        glVertex3f(-0.25, 0.92, 5.922); glVertex3f(0.05, 0.92, 5.922)
+        glVertex3f(1.45, 2.38, 5.922); glVertex3f(1.15, 2.38, 5.922)
+        glEnd()
+        glDisable(GL_BLEND)
+
+        # B. Synchronized World Time Digital Clock Array (above observation window, Y = 2.65)
+        clock_zones = [
+            (-0.35, (0.15, 0.95, 0.35)),
+            (0.35,  (0.10, 0.85, 0.98)),
+            (1.05,  (0.95, 0.85, 0.15)),
+            (1.75,  (0.98, 0.55, 0.10))
+        ]
+        for cx, led_col in clock_zones:
+            # Housing (Z = 5.92)
+            self._draw_box(cx, 2.65, 5.92, 0.54, 0.18, 0.04, (0.10, 0.12, 0.15))
+            # Bezel recess
+            self._draw_box(cx, 2.67, 5.895, 0.46, 0.08, 0.005, (0.04, 0.05, 0.07))
+            # Segmented LED digits
+            for d in range(6):
+                dx = cx - 0.18 + d * 0.072
+                self._draw_box(dx, 2.67, 5.890, 0.04, 0.06, 0.002, led_col)
+            # Label badge
+            self._draw_box(cx, 2.59, 5.895, 0.24, 0.035, 0.002, (0.75, 0.78, 0.84))
+        # NTP Stratum-1 badge
+        self._draw_box(2.25, 2.65, 5.92, 0.24, 0.12, 0.03, (0.05, 0.35, 0.65))
+
+        # C. 75" Enterprise Datacenter Infrastructure Video Wall (DCIM Telemetry) (X = -3.8)
+        self._draw_box(-3.80, 1.72, 5.96, 0.45, 0.55, 0.04, (0.25, 0.28, 0.32))  # Wall mount
+        self._draw_box(-3.80, 1.72, 5.92, 1.85, 1.15, 0.04, (0.12, 0.13, 0.16))  # Bezel
+        self._draw_box(-3.80, 1.72, 5.895, 1.78, 1.08, 0.005, (0.06, 0.09, 0.15)) # Screen
+        # DCIM header bar
+        self._draw_box(-3.80, 2.18, 5.890, 1.74, 0.08, 0.002, (0.0, 0.38, 0.78))
+        # Tile 1: Facility PUE Gauge (1.18 PUE - Green Optimal)
+        self._draw_box(-4.25, 1.92, 5.890, 0.72, 0.36, 0.002, (0.09, 0.13, 0.22))
+        self._draw_box(-4.25, 1.92, 5.886, 0.24, 0.24, 0.002, (0.10, 0.85, 0.35))
+        # Tile 2: Thermal & Climate Environmental Map (19.4°C / 46% RH)
+        self._draw_box(-3.35, 1.92, 5.890, 0.72, 0.36, 0.002, (0.09, 0.13, 0.22))
+        self._draw_box(-3.35, 1.92, 5.886, 0.24, 0.14, 0.002, (0.0, 0.65, 0.95))
+        # Tile 3: Rack Compute Load & Network Throughput
+        self._draw_box(-3.80, 1.42, 5.890, 1.62, 0.50, 0.002, (0.09, 0.13, 0.22))
+        for r_bar in range(3):
+            bx = -4.30 + r_bar * 0.50
+            self._draw_box(bx, 1.40, 5.886, 0.32, 0.28, 0.002, (0.12, 0.16, 0.26))
+            fill_h = 0.12 + r_bar * 0.06
+            self._draw_box(bx, 1.26 + fill_h / 2.0, 5.882, 0.26, fill_h, 0.002, (0.10, 0.80, 0.45))
+
+        # D. High-Security Airlock / Mantrap Entrance Double Doors (X = 4.30)
+        # Door frame architrave (Z = 5.95, d = 0.06 -> front face at 5.92)
+        self._draw_box(4.30, 1.25, 5.95, 1.88, 2.52, 0.06, (0.16, 0.18, 0.22))
+        # Door leaves (Z = 5.91, d = 0.03 -> front face at 5.895)
+        for d_x in [3.91, 4.69]:
+            self._draw_box(d_x, 1.20, 5.91, 0.84, 2.38, 0.03, (0.76, 0.80, 0.86))
+            # Stainless kickplate
+            self._draw_box(d_x, 0.22, 5.89, 0.80, 0.38, 0.005, (0.58, 0.62, 0.68))
+            # Vision safety glass window
+            self._draw_box(d_x, 1.45, 5.89, 0.20, 0.90, 0.005, (0.15, 0.30, 0.45))
+            self._draw_box(d_x, 1.45, 5.888, 0.16, 0.84, 0.002, (0.65, 0.85, 0.98))
+        # Stainless steel long vertical pull handles
+        self._draw_box(4.25, 1.15, 5.86, 0.025, 0.55, 0.025, (0.90, 0.92, 0.95))
+        self._draw_box(4.35, 1.15, 5.86, 0.025, 0.55, 0.025, (0.90, 0.92, 0.95))
+        # Biometric Palm/Fingerprint Terminal
+        self._draw_box(5.35, 1.35, 5.92, 0.14, 0.24, 0.04, (0.12, 0.14, 0.18))
+        self._draw_box(5.35, 1.40, 5.895, 0.06, 0.07, 0.005, (0.0, 0.70, 0.95))
+        self._draw_box(5.35, 1.27, 5.895, 0.08, 0.08, 0.005, (0.28, 0.30, 0.35))
+        # Emergency door release station
+        self._draw_box(5.35, 1.05, 5.92, 0.12, 0.14, 0.04, (0.10, 0.70, 0.30))
+        # Overhead illuminated status banner
+        self._draw_box(4.30, 2.62, 5.92, 0.72, 0.16, 0.04, (0.12, 0.14, 0.18))
+        self._draw_box(4.30, 2.62, 5.895, 0.64, 0.11, 0.005, (0.05, 0.85, 0.35))
+
+        # 16. Right Wall High-Power Switchgear Cabinet & Environmental Telemetry Pod (X = 5.98, Z = 2.8 to 5.5)
+        # 480V 3-Phase Main Switchgear & ATS Cabinet (Z = 3.60)
+        self._draw_box(5.88, 1.35, 3.60, 0.22, 2.20, 0.95, (0.72, 0.75, 0.80))
+        self._draw_box(5.76, 1.35, 3.38, 0.015, 2.12, 0.44, (0.64, 0.67, 0.72))
+        self._draw_box(5.76, 1.35, 3.82, 0.015, 2.12, 0.44, (0.64, 0.67, 0.72))
+        # Rotary disconnect switch
+        self._draw_box(5.74, 1.70, 3.82, 0.04, 0.12, 0.12, (0.85, 0.15, 0.15))
+        # Power Quality digital meter
+        self._draw_box(5.75, 1.95, 3.38, 0.01, 0.18, 0.22, (0.10, 0.12, 0.16))
+        self._draw_box(5.74, 1.95, 3.38, 0.005, 0.12, 0.16, (0.05, 0.35, 0.85))
+        # 3-Phase neon indicator lamps
+        self._draw_box(5.75, 2.15, 3.28, 0.02, 0.03, 0.03, (0.95, 0.15, 0.15))
+        self._draw_box(5.75, 2.15, 3.38, 0.02, 0.03, 0.03, (0.95, 0.85, 0.10))
+        self._draw_box(5.75, 2.15, 3.48, 0.02, 0.03, 0.03, (0.15, 0.45, 0.95))
+        # Arc-flash hazard placard
+        self._draw_box(5.75, 1.45, 3.38, 0.005, 0.14, 0.18, (0.95, 0.82, 0.08))
+
+        # Datacenter Environmental Telemetry Pod (Z = 4.80)
+        self._draw_box(5.95, 1.55, 4.80, 0.06, 0.35, 0.25, (0.92, 0.94, 0.96))
+        self._draw_box(5.91, 1.48, 4.80, 0.02, 0.12, 0.18, (0.18, 0.20, 0.24))
+        self._draw_box(5.91, 1.65, 4.80, 0.01, 0.02, 0.02, (0.10, 0.95, 0.35))
+
     def _render_room(self, now):
         if self.room_display_list is None:
             self._init_display_lists()
@@ -467,8 +778,8 @@ class Renderer3D:
         # Dynamic elements:
         # 1. Subtle blue chilled-air glow from plenum
         for rx in [-1.4, 0.0, 1.4]:
-            vx0, vz0 = rx - 0.28, -0.95
-            vx1, vz1 = rx + 0.28, -0.45
+            vx0, vz0 = rx - 0.26, -1.10
+            vx1, vz1 = rx + 0.26, -0.56
             pulse = 0.65 + 0.15 * math.sin(now * 2.0 + rx)
             glBegin(GL_QUADS)
             glColor4f(0.0, 0.65, 0.95, 0.12 * pulse)
@@ -884,27 +1195,6 @@ class Renderer3D:
         for lx in [-0.64, 0.64]:
             for lz in [-0.32, 0.32]:
                 self._draw_box(lx, 0.375, lz, 0.04, 0.75, 0.04, (0.22, 0.25, 0.30))
-
-        # Ergonomic High-Back Mesh Office Chair (on floor in front of workbench)
-        chair_z = 0.55
-        # 5-Star Caster Wheel Base
-        self._draw_box(0.0, 0.06, chair_z, 0.52, 0.03, 0.52, (0.15, 0.16, 0.19))
-        for star_ang in range(5):
-            sa = star_ang * 2.0 * math.pi / 5.0
-            cx = math.cos(sa) * 0.24
-            cz = chair_z + math.sin(sa) * 0.24
-            self._draw_box(cx, 0.03, cz, 0.04, 0.05, 0.04, (0.08, 0.09, 0.11))
-        # Chrome Hydraulic Cylinder
-        self._draw_box(0.0, 0.25, chair_z, 0.05, 0.36, 0.05, (0.75, 0.78, 0.82))
-        # Contoured Seat Cushion
-        self._draw_box(0.0, 0.46, chair_z, 0.46, 0.07, 0.44, (0.18, 0.20, 0.24))
-        # Mesh Ergonomic Backrest with Lumbar Support
-        self._draw_box(0.0, 0.78, chair_z + 0.19, 0.42, 0.56, 0.04, (0.12, 0.14, 0.17))
-        self._draw_box(0.0, 0.65, chair_z + 0.17, 0.34, 0.12, 0.03, (0.24, 0.26, 0.30))
-        # Adjustable Armrests
-        for arm_x in [-0.25, 0.25]:
-            self._draw_box(arm_x, 0.58, chair_z, 0.03, 0.18, 0.04, (0.20, 0.22, 0.26))
-            self._draw_box(arm_x, 0.68, chair_z - 0.02, 0.06, 0.03, 0.22, (0.10, 0.11, 0.13))
 
         glPopMatrix()
 
@@ -1852,6 +2142,9 @@ class Renderer3D:
             self._draw_box(0.0, 0.0, back_z - 0.006, 0.015, 0.012, 0.002, (0.04, 0.04, 0.05))
 
         # 5. REAL 3D POWER CORDS (C13-to-C14) TO REAR PDUS (FEED A = BLUE, FEED B = RED)
+        if getattr(dev, "is_showcase", False):
+            return
+
         cord_radius = 0.0062  # Heavy-duty 12AWG datacenter power cord (12.4mm diameter)
 
         # Cord A: From PSU 1 on left to PDU-A on left rear post (Feed A - Enterprise Royal Blue)
@@ -2149,7 +2442,9 @@ class Renderer3D:
 
     def _render_highlight(self, dev, port, now):
         """Draws neon cyan/golden wireframe bounding box with animated targeting brackets."""
-        glDisable(GL_DEPTH_TEST)
+        # Respect depth testing so wireframe is occluded by foreground obstacles (posts, racks, etc.)
+        glEnable(GL_DEPTH_TEST)
+        glDepthMask(GL_FALSE)
 
         if port:
             # Highlight individual port with neon golden focus box
@@ -2163,9 +2458,12 @@ class Renderer3D:
             pulse = 0.85 + 0.15 * math.sin(now * 4.0)
             glColor4f(0.0, 0.80 * pulse, 1.0, 0.90)
             glLineWidth(2.5)
-            self._draw_wireframe_box(dev.pos_x, dev.pos_y, dev.pos_z, dev.width + 0.015, dev.height + 0.015, dev.depth + 0.015)
+            w_margin = 0.006 if dev.device_type != "laptop" else 0.015
+            h_margin = 0.006 if dev.device_type != "laptop" else 0.015
+            d_margin = 0.008 if dev.device_type != "laptop" else 0.015
+            self._draw_wireframe_box(dev.pos_x, dev.pos_y, dev.pos_z, dev.width + w_margin, dev.height + h_margin, dev.depth + d_margin)
 
-        glEnable(GL_DEPTH_TEST)
+        glDepthMask(GL_TRUE)
 
     def _draw_box(self, x, y, z, w, h, d, color):
         """Draws a 3D box with directional illumination for crisp edge definition and contrast."""
@@ -2232,3 +2530,167 @@ class Renderer3D:
                 glVertex3f(x - hw, y + sy*hh, z + sz*hd)
                 glVertex3f(x + hw, y + sy*hh, z + sz*hd)
         glEnd()
+
+    def _draw_turntable_pedestal(self, radius=0.38, y=-0.04, now=0.0):
+        """Draws high-tech sci-fi circular pedestal platform under the showcase device (Clean Light Studio Theme)."""
+        segments = 48
+        # Outer brushed aluminum metallic disc
+        glBegin(GL_TRIANGLE_FAN)
+        glColor3f(0.86, 0.89, 0.93)
+        glVertex3f(0.0, y, 0.0)
+        for i in range(segments + 1):
+            ang = i * (2.0 * math.pi / segments)
+            px = math.cos(ang) * radius
+            pz = math.sin(ang) * radius
+            glColor3f(0.78, 0.82, 0.88)
+            glVertex3f(px, y, pz)
+        glEnd()
+
+        # Concentric glowing enterprise blue accent ring
+        pulse = 0.85 + 0.15 * math.sin(now * 3.0)
+        glLineWidth(2.5)
+        glBegin(GL_LINE_LOOP)
+        glColor4f(0.0, 0.45 * pulse, 0.92 * pulse, 0.95)
+        r_glow = radius * 0.92
+        for i in range(segments):
+            ang = i * (2.0 * math.pi / segments)
+            glVertex3f(math.cos(ang) * r_glow, y + 0.001, math.sin(ang) * r_glow)
+        glEnd()
+
+        # Inner subtle ring
+        glLineWidth(1.0)
+        glBegin(GL_LINE_LOOP)
+        glColor4f(0.55, 0.65, 0.78, 0.7)
+        r_inner = radius * 0.70
+        for i in range(segments):
+            ang = i * (2.0 * math.pi / segments)
+            glVertex3f(math.cos(ang) * r_inner, y + 0.001, math.sin(ang) * r_inner)
+        glEnd()
+
+        # Radial tick marks at 45 degree intervals
+        glBegin(GL_LINES)
+        glColor4f(0.0, 0.40, 0.85, 0.9)
+        for deg in (0, 45, 90, 135, 180, 225, 270, 315):
+            rad = math.radians(deg)
+            c = math.cos(rad)
+            s = math.sin(rad)
+            glVertex3f(c * (radius * 0.80), y + 0.001, s * (radius * 0.80))
+            glVertex3f(c * (radius * 0.94), y + 0.001, s * (radius * 0.94))
+        glEnd()
+
+    def render_device_preview(self, dev, yaw, pitch, now, viewport_rect, screen_w, screen_h):
+        """Renders an interactive 3D device model on a high-tech pedestal in a dedicated viewport."""
+        vx, vy, vw, vh = viewport_rect
+        if vw <= 0 or vh <= 0:
+            return
+
+        gl_y = screen_h - (vy + vh)
+
+        glEnable(GL_SCISSOR_TEST)
+        glScissor(vx, gl_y, vw, vh)
+        glViewport(vx, gl_y, vw, vh)
+
+        # Clear viewport background with sleek light studio datacenter tone
+        glClearColor(0.93, 0.95, 0.98, 1.0)
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+        aspect = float(vw) / float(max(1, vh))
+        gluPerspective(38.0, aspect, 0.05, 50.0)
+
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+
+        if dev is None:
+            # If no device, restore and return
+            glPopMatrix()
+            glMatrixMode(GL_PROJECTION)
+            glPopMatrix()
+            glMatrixMode(GL_MODELVIEW)
+            glDisable(GL_SCISSOR_TEST)
+            glViewport(0, 0, screen_w, screen_h)
+            return
+
+        # Fixed camera distance tailored to device form factor (NO mouse wheel zoom per user request)
+        if dev.device_type == "laptop":
+            dist = 0.62
+            pedestal_y = -0.06
+            pedestal_r = 0.28
+        elif dev.device_type == "server":
+            dist = 1.15
+            pedestal_y = -dev.height / 2.0 - 0.02
+            pedestal_r = 0.42
+        else:
+            dist = 1.05
+            pedestal_y = -dev.height / 2.0 - 0.02
+            pedestal_r = 0.38
+
+        glTranslatef(0.0, 0.0, -dist)
+        glRotatef(pitch, 1.0, 0.0, 0.0)
+        glRotatef(yaw, 0.0, 1.0, 0.0)
+
+        # 1. Render High-Tech Turntable Pedestal
+        self._draw_turntable_pedestal(radius=pedestal_r, y=pedestal_y, now=now)
+
+        # 2. Render 3D Device Geometry
+        if dev.device_type == "laptop":
+            if self.laptop_linux_display_list is None or not glIsList(self.laptop_linux_display_list):
+                self.laptop_linux_display_list = glGenLists(1)
+                glNewList(self.laptop_linux_display_list, GL_COMPILE)
+                self._compile_laptop_static_list(is_windows=False)
+                glEndList()
+            if self.laptop_win_display_list is None or not glIsList(self.laptop_win_display_list):
+                self.laptop_win_display_list = glGenLists(1)
+                glNewList(self.laptop_win_display_list, GL_COMPILE)
+                self._compile_laptop_static_list(is_windows=True)
+                glEndList()
+            glPushMatrix()
+            glTranslatef(0.0, -0.02, 0.0)
+            self._render_laptop(dev, now)
+            glPopMatrix()
+        else:
+            # Compile display lists if needed
+            if getattr(dev, "_dl_body", None) is None or not glIsList(dev._dl_body):
+                dev._dl_body = glGenLists(1)
+                self._device_display_lists.add(dev._dl_body)
+                glNewList(dev._dl_body, GL_COMPILE)
+                self._compile_device_body(dev)
+                glEndList()
+
+            if getattr(dev, "_dl_front", None) is None or not glIsList(dev._dl_front):
+                dev._dl_front = glGenLists(1)
+                self._device_display_lists.add(dev._dl_front)
+                glNewList(dev._dl_front, GL_COMPILE)
+                self._compile_device_front(dev)
+                glEndList()
+
+            if getattr(dev, "_dl_rear", None) is None or not glIsList(dev._dl_rear):
+                dev._dl_rear = glGenLists(1)
+                self._device_display_lists.add(dev._dl_rear)
+                glNewList(dev._dl_rear, GL_COMPILE)
+                self._compile_device_rear(dev)
+                glEndList()
+
+            # Render complete solid chassis enclosure
+            glCallList(dev._dl_body)
+
+            # Render front ports, bezels, and blinking LEDs
+            glCallList(dev._dl_front)
+            self._render_device_dynamic_front(dev, now)
+
+            # Render rear PSUs, fan grilles, switches, and ports
+            glCallList(dev._dl_rear)
+            self._render_device_dynamic_rear(dev, now)
+
+        # Restore OpenGL state
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+        glDisable(GL_SCISSOR_TEST)
+        glViewport(0, 0, screen_w, screen_h)
+        glClearColor(0.88, 0.91, 0.95, 1.0)
+

@@ -195,6 +195,12 @@ class GameManager:
                     self.menu.state = MenuState.TOPOLOGY_MAP
                     self.window.capture_mouse(False)
 
+                # Open Controls & CLI Cheatsheet [H] / [F1]
+                elif event.key in (pygame.K_h, pygame.K_F1):
+                    self.menu.help_guide_prev_state = MenuState.IN_GAME
+                    self.menu.state = MenuState.HELP_GUIDE
+                    self.window.capture_mouse(False)
+
                 # Open Terminal / Laptop GUI on targeted device [E]
                 elif event.key == pygame.K_e:
                     f_dev, f_port, _ = self.camera.raycast(self.mode.devices)
@@ -319,6 +325,9 @@ class GameManager:
         if self.terminal and self.terminal.is_open:
             self.terminal.update(dt)
 
+        if self.menu.state == MenuState.HELP_GUIDE:
+            self.menu.update(dt)
+
         if self.menu.state == MenuState.IN_GAME and not (self.terminal and self.terminal.is_open) and not (self.laptop_gui and self.laptop_gui.is_open):
             keys = pygame.key.get_pressed()
             self.camera.update(keys, dt, pygame)
@@ -335,6 +344,19 @@ class GameManager:
         elif self.mode and self.menu.state in (MenuState.IN_GAME, MenuState.PAUSE, MenuState.TOPOLOGY_MAP, MenuState.DEVICE_MANAGER):
             f_dev, f_port, _ = self.camera.raycast(self.mode.devices)
             self.renderer3d.render_scene(self.camera, self.mode.devices, self.mode.cables, f_dev, f_port)
+        elif self.menu.state == MenuState.HELP_GUIDE:
+            # Render interactive 3D Device Showcase on glowing turntable
+            vp_rect = self.menu.get_showcase_viewport(self.window.width, self.window.height)
+            dev = self.menu.get_showcase_device()
+            self.renderer3d.render_device_preview(
+                dev,
+                self.menu.showcase_yaw,
+                self.menu.showcase_pitch,
+                time.time(),
+                vp_rect,
+                self.window.width,
+                self.window.height
+            )
         else:
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 

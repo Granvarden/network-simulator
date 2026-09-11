@@ -9,6 +9,578 @@ from network.router import Router
 from network.host import Host
 from network.firewall import Firewall
 
+SHOWCASE_COMMANDS = {
+    "router": {
+        "categories": ["ALL", "IP & INTERFACES", "ROUTING & GW", "ROUTER-ON-A-STICK", "DHCP SERVER", "NAT & PAT", "SHOW & DIAG"],
+        "commands": [
+            {
+                "cmd": "interface <name>",
+                "cat": "IP & INTERFACES",
+                "desc": "Select network interface to configure (e.g. interface g0/0)",
+                "desc_th": "เลือก Interface เพื่อเข้าสู่โหมดปรับแต่งพอร์ต เช่น interface g0/0",
+                "example": "Router(config)# interface GigabitEthernet0/0"
+            },
+            {
+                "cmd": "ip address <ip> <mask>",
+                "cat": "IP & INTERFACES",
+                "desc": "Assign IPv4 address and subnet mask to the selected interface",
+                "desc_th": "กำหนดหมายเลข IPv4 Address และ Subnet Mask ให้กับพอร์ต",
+                "example": "Router(config-if)# ip address 192.168.1.1 255.255.255.0"
+            },
+            {
+                "cmd": "no shutdown",
+                "cat": "IP & INTERFACES",
+                "desc": "Bring interface administratively UP and enable physical link",
+                "desc_th": "เปิดใช้งาน Interface ให้สถานะเปลี่ยนเป็น UP",
+                "example": "Router(config-if)# no shutdown"
+            },
+            {
+                "cmd": "description <text>",
+                "cat": "IP & INTERFACES",
+                "desc": "Add descriptive label explaining port purpose or connected link",
+                "desc_th": "ใส่ข้อความระบุหน้าที่ของพอร์ตหรืออุปกรณ์ปลายทาง",
+                "example": "Router(config-if)# description WAN Uplink to ISP Gateway"
+            },
+            {
+                "cmd": "ip route 0.0.0.0 0.0.0.0 <gw>",
+                "cat": "ROUTING & GW",
+                "desc": "Configure default static route (Gateway of Last Resort to Internet)",
+                "desc_th": "กำหนด Default Route ส่งข้อมูลออก Internet ผ่าน Next-Hop",
+                "example": "Router(config)# ip route 0.0.0.0 0.0.0.0 203.0.113.1"
+            },
+            {
+                "cmd": "ip route <dest> <mask> <gw>",
+                "cat": "ROUTING & GW",
+                "desc": "Add static route for a specific destination subnet via next-hop IP",
+                "desc_th": "กำหนดเส้นทาง Static Route ไปยัง Subnet ปลายทางที่ต้องการ",
+                "example": "Router(config)# ip route 10.10.20.0 255.255.255.0 192.168.1.254"
+            },
+            {
+                "cmd": "show ip route",
+                "cat": "ROUTING & GW",
+                "desc": "Display the active IPv4 routing table and gateway information",
+                "desc_th": "แสดงตารางเส้นทาง IPv4 Routing Table ของเราเตอร์",
+                "example": "Router# show ip route"
+            },
+            {
+                "cmd": "interface <name>.<sub_id>",
+                "cat": "ROUTER-ON-A-STICK",
+                "desc": "Create a virtual subinterface for inter-VLAN routing (Router-on-a-Stick)",
+                "desc_th": "สร้าง Subinterface เสมือนสำหรับ Inter-VLAN Routing",
+                "example": "Router(config)# interface GigabitEthernet0/1.10"
+            },
+            {
+                "cmd": "encapsulation dot1Q <vlan_id>",
+                "cat": "ROUTER-ON-A-STICK",
+                "desc": "Bind IEEE 802.1Q VLAN encapsulation tag to the subinterface",
+                "desc_th": "ผูก Tag 802.1Q VLAN กับ Subinterface",
+                "example": "Router(config-subif)# encapsulation dot1Q 10"
+            },
+            {
+                "cmd": "ip dhcp pool <name>",
+                "cat": "DHCP SERVER",
+                "desc": "Create an IPv4 DHCP address pool for automated client allocation",
+                "desc_th": "สร้าง DHCP Address Pool สำหรับแจก IP ให้ Client อัตโนมัติ",
+                "example": "Router(config)# ip dhcp pool POOL_LAN_10"
+            },
+            {
+                "cmd": "network <net> <mask>",
+                "cat": "DHCP SERVER",
+                "desc": "Define assignable network subnet and mask for DHCP pool",
+                "desc_th": "กำหนด Subnet และ Mask ของวงเครือข่ายที่จะแจก IP",
+                "example": "Router(dhcp-config)# network 192.168.10.0 255.255.255.0"
+            },
+            {
+                "cmd": "default-router <ip>",
+                "cat": "DHCP SERVER",
+                "desc": "Specify default gateway IP address handed out to DHCP clients",
+                "desc_th": "กำหนดหมายเลข Default Gateway ที่จะส่งให้เครื่องลูกข่าย",
+                "example": "Router(dhcp-config)# default-router 192.168.10.1"
+            },
+            {
+                "cmd": "dns-server <ip>",
+                "cat": "DHCP SERVER",
+                "desc": "Specify primary DNS server address distributed to DHCP clients",
+                "desc_th": "กำหนดหมายเลข DNS Server ที่จะส่งให้เครื่องลูกข่าย",
+                "example": "Router(dhcp-config)# dns-server 8.8.8.8"
+            },
+            {
+                "cmd": "ip dhcp excluded-address <low> [high]",
+                "cat": "DHCP SERVER",
+                "desc": "Reserve static IP range excluded from dynamic allocation",
+                "desc_th": "สงวนช่วง IP Address สำหรับอุปกรณ์ Static ไม่ให้ DHCP แจกซ้ำ",
+                "example": "Router(config)# ip dhcp excluded-address 192.168.10.1 192.168.10.10"
+            },
+            {
+                "cmd": "ip nat inside / ip nat outside",
+                "cat": "NAT & PAT",
+                "desc": "Designate interface as internal private LAN or external public WAN",
+                "desc_th": "ระบุขอบเขต Interface ว่าเป็นฝั่ง Inside (LAN) หรือ Outside (WAN)",
+                "example": "Router(config-if)# ip nat inside"
+            },
+            {
+                "cmd": "ip nat inside source list <n> interface <if> overload",
+                "cat": "NAT & PAT",
+                "desc": "Enable Port Address Translation (PAT) to share one public IP",
+                "desc_th": "เปิดใช้งาน PAT แชร์ IP ขาออกสู่ Internet สาธารณะ",
+                "example": "Router(config)# ip nat inside source list 1 interface g0/0 overload"
+            },
+            {
+                "cmd": "show ip interface brief",
+                "cat": "SHOW & DIAG",
+                "desc": "Display summary table of all interface states, IPs, and link status",
+                "desc_th": "แสดงตารางสรุปสถานะ Up/Down และหมายเลข IP ของทุกพอร์ต",
+                "example": "Router# show ip interface brief"
+            },
+            {
+                "cmd": "ping <target_ip>",
+                "cat": "SHOW & DIAG",
+                "desc": "Send 5 ICMP Echo Requests to verify end-to-end network connectivity",
+                "desc_th": "ส่งแพ็กเก็ต ICMP เพื่อทดสอบการเชื่อมต่อปลายทาง",
+                "example": "Router# ping 8.8.8.8"
+            }
+        ]
+    },
+    "switch": {
+        "categories": ["ALL", "VLAN CONFIG", "ACCESS PORTS", "TRUNK (802.1Q)", "SVI & MGMT", "SPANNING TREE", "SHOW & DIAG"],
+        "commands": [
+            {
+                "cmd": "vlan <id>",
+                "cat": "VLAN CONFIG",
+                "desc": "Create a Layer 2 VLAN broadcast domain",
+                "desc_th": "สร้าง VLAN วงใหม่ในฐานข้อมูล Switch",
+                "example": "Switch(config)# vlan 10"
+            },
+            {
+                "cmd": "name <vlan_name>",
+                "cat": "VLAN CONFIG",
+                "desc": "Assign descriptive name to the VLAN (e.g. SALES, ENGINEERING)",
+                "desc_th": "ตั้งชื่อระบุกลุ่มงานให้กับ VLAN เช่น SALES, SERVERS",
+                "example": "Switch(config-vlan)# name SALES_DEPT"
+            },
+            {
+                "cmd": "show vlan brief",
+                "cat": "VLAN CONFIG",
+                "desc": "List all active VLANs and switchports currently assigned to them",
+                "desc_th": "แสดงรายการ VLAN ทั้งหมดและพอร์ตที่สังกัดอยู่",
+                "example": "Switch# show vlan brief"
+            },
+            {
+                "cmd": "switchport mode access",
+                "cat": "ACCESS PORTS",
+                "desc": "Configure port to untagged Access mode for end devices (PCs, Servers)",
+                "desc_th": "กำหนดให้พอร์ตทำงานในโหมด Access สำหรับต่อ End Device",
+                "example": "Switch(config-if)# switchport mode access"
+            },
+            {
+                "cmd": "switchport access vlan <id>",
+                "cat": "ACCESS PORTS",
+                "desc": "Assign access port to specific VLAN broadcast domain",
+                "desc_th": "ผูกพอร์ต Access เข้ากับ VLAN ที่ต้องการ",
+                "example": "Switch(config-if)# switchport access vlan 10"
+            },
+            {
+                "cmd": "switchport mode trunk",
+                "cat": "TRUNK (802.1Q)",
+                "desc": "Configure port as an 802.1Q Trunk link carrying multi-VLAN tagged traffic",
+                "desc_th": "ตั้งค่าพอร์ตให้เป็น Trunk สำหรับส่งผ่านข้อมูลหลาย VLAN ข้ามสวิตช์",
+                "example": "Switch(config-if)# switchport mode trunk"
+            },
+            {
+                "cmd": "switchport trunk allowed vlan <list>",
+                "cat": "TRUNK (802.1Q)",
+                "desc": "Filter which VLANs are permitted to traverse this trunk link",
+                "desc_th": "จำกัดหมายเลข VLAN ที่ได้รับอนุญาตให้ส่งผ่าน Trunk พอร์ตนี้",
+                "example": "Switch(config-if)# switchport trunk allowed vlan 10,20,30"
+            },
+            {
+                "cmd": "interface vlan <id>",
+                "cat": "SVI & MGMT",
+                "desc": "Enter Switch Virtual Interface (SVI) for remote in-band management",
+                "desc_th": "เข้าสู่โหมดปรับแต่ง SVI (Switch Virtual Interface) สำหรับจัดการ",
+                "example": "Switch(config)# interface vlan 1"
+            },
+            {
+                "cmd": "ip address <ip> <mask>",
+                "cat": "SVI & MGMT",
+                "desc": "Assign management IP address to the switch SVI",
+                "desc_th": "กำหนดหมายเลข IP ให้กับ SVI เพื่อใช้ Remote SSH/Web/Ping",
+                "example": "Switch(config-if)# ip address 192.168.1.2 255.255.255.0"
+            },
+            {
+                "cmd": "ip default-gateway <ip>",
+                "cat": "SVI & MGMT",
+                "desc": "Configure default gateway IP so switch can be managed across subnets",
+                "desc_th": "กำหนด Default Gateway ให้สวิตช์สามารถสื่อสารข้าม Subnet ได้",
+                "example": "Switch(config)# ip default-gateway 192.168.1.1"
+            },
+            {
+                "cmd": "spanning-tree mode rapid-pvst",
+                "cat": "SPANNING TREE",
+                "desc": "Enable Rapid Per-VLAN Spanning Tree protocol (802.1w) to prevent loops",
+                "desc_th": "เปิดใช้งาน Rapid Spanning Tree เพื่อป้องกัน Loop และลู่เข้าเร็วขึ้น",
+                "example": "Switch(config)# spanning-tree mode rapid-pvst"
+            },
+            {
+                "cmd": "spanning-tree vlan <id> priority <val>",
+                "cat": "SPANNING TREE",
+                "desc": "Configure switch bridge priority to become STP Root Bridge",
+                "desc_th": "กำหนดค่า Priority เพื่อให้สวิตช์ตัวนี้เป็น STP Root Bridge",
+                "example": "Switch(config)# spanning-tree vlan 10 priority 4096"
+            },
+            {
+                "cmd": "show spanning-tree",
+                "cat": "SPANNING TREE",
+                "desc": "Display STP topology, root bridge status, and port blocking states",
+                "desc_th": "แสดงสถานะ Spanning Tree, Root Bridge และพอร์ตที่ Forwarding/Blocking",
+                "example": "Switch# show spanning-tree"
+            },
+            {
+                "cmd": "show mac address-table",
+                "cat": "SHOW & DIAG",
+                "desc": "Display CAM hardware table mapping learned MAC addresses to ports",
+                "desc_th": "แสดงตาราง MAC Address Table ที่สวิตช์เรียนรู้ได้ในแต่ละพอร์ต",
+                "example": "Switch# show mac address-table"
+            },
+            {
+                "cmd": "show interfaces status",
+                "cat": "SHOW & DIAG",
+                "desc": "Display summary table of all physical port states and VLAN memberships",
+                "desc_th": "แสดงตารางสรุปสถานะพอร์ต Speed, Duplex, VLAN และ Link",
+                "example": "Switch# show interfaces status"
+            }
+        ]
+    },
+    "server": {
+        "categories": ["ALL", "NETWORK & IP", "ROUTING & GW", "DHCP CLIENT", "SERVICES", "DIAGNOSTICS"],
+        "commands": [
+            {
+                "cmd": "ip addr show",
+                "cat": "NETWORK & IP",
+                "desc": "Display all network interfaces, assigned IP addresses, and MAC addresses",
+                "desc_th": "แสดงรายการการ์ดแลน หมายเลข IP และ MAC Address ทั้งหมด",
+                "example": "server:~$ ip addr show"
+            },
+            {
+                "cmd": "ip addr add <ip>/<cidr> dev <if>",
+                "cat": "NETWORK & IP",
+                "desc": "Manually assign static IPv4 address and CIDR prefix to interface",
+                "desc_th": "ตั้งค่าหมายเลข Static IPv4 Address ให้กับการ์ดแลน",
+                "example": "server:~$ sudo ip addr add 192.168.1.50/24 dev eth0"
+            },
+            {
+                "cmd": "ip link set <if> up",
+                "cat": "NETWORK & IP",
+                "desc": "Bring network interface administratively UP",
+                "desc_th": "สั่งเปิดใช้งานการ์ดแลนให้เชื่อมต่อสัญญาณ",
+                "example": "server:~$ sudo ip link set eth0 up"
+            },
+            {
+                "cmd": "ip route add default via <gw> dev <if>",
+                "cat": "ROUTING & GW",
+                "desc": "Add default gateway route to Linux kernel routing table",
+                "desc_th": "กำหนด Default Gateway ให้เครื่อง Server ออกสู่ภายนอก",
+                "example": "server:~$ sudo ip route add default via 192.168.1.1 dev eth0"
+            },
+            {
+                "cmd": "ip route show",
+                "cat": "ROUTING & GW",
+                "desc": "Display the active Linux kernel IPv4 routing table",
+                "desc_th": "แสดงตารางเส้นทาง Routing Table ในระบบปฏิบัติการ Linux",
+                "example": "server:~$ ip route show"
+            },
+            {
+                "cmd": "dhclient -v <if>",
+                "cat": "DHCP CLIENT",
+                "desc": "Send DHCP DISCOVER to request new IP address lease from server",
+                "desc_th": "ส่งคำขอหมายเลข IP อัตโนมัติจาก DHCP Server",
+                "example": "server:~$ sudo dhclient -v eth0"
+            },
+            {
+                "cmd": "dhclient -r <if>",
+                "cat": "DHCP CLIENT",
+                "desc": "Release currently held DHCP lease and clear assigned IP",
+                "desc_th": "คืนหมายเลข IP กลับไปยัง DHCP Server",
+                "example": "server:~$ sudo dhclient -r eth0"
+            },
+            {
+                "cmd": "ping -c 4 <target_ip>",
+                "cat": "DIAGNOSTICS",
+                "desc": "Send 4 ICMP test packets to check server reachability and latency",
+                "desc_th": "ทดสอบส่งสัญญาณ Ping ไปยังปลายทาง 4 ครั้ง",
+                "example": "server:~$ ping -c 4 192.168.1.1"
+            },
+            {
+                "cmd": "traceroute <target_ip>",
+                "cat": "DIAGNOSTICS",
+                "desc": "Trace multi-hop network path and round-trip delay per hop",
+                "desc_th": "ตรวจสอบเส้นทางเครือข่ายและวัดค่าหน่วงเวลาทีละ Hop",
+                "example": "server:~$ traceroute 8.8.8.8"
+            },
+            {
+                "cmd": "ss -tulpn",
+                "cat": "SERVICES",
+                "desc": "Display listening TCP/UDP ports and active network service daemons",
+                "desc_th": "แสดงรายการพอร์ต TCP/UDP ที่เปิดรับการเชื่อมต่ออยู่",
+                "example": "server:~$ ss -tulpn"
+            },
+            {
+                "cmd": "curl -I http://<target_ip>",
+                "cat": "SERVICES",
+                "desc": "Perform HTTP HEAD request to test web server status code",
+                "desc_th": "ทดสอบการตอบสนองของ Web Server ด้วย HTTP HEAD",
+                "example": "server:~$ curl -I http://192.168.1.1"
+            }
+        ]
+    },
+    "firewall": {
+        "categories": ["ALL", "INTERFACE & ZONES", "ROUTING", "ACCESS CONTROL", "NAT & PAT", "MONITORING"],
+        "commands": [
+            {
+                "cmd": "nameif <zone>",
+                "cat": "INTERFACE & ZONES",
+                "desc": "Assign interface to a logical security zone (outside, inside, dmz)",
+                "desc_th": "กำหนด Security Zone ให้กับ Interface เช่น outside, inside, dmz",
+                "example": "Firewall(config-if)# nameif outside"
+            },
+            {
+                "cmd": "security-level <0-100>",
+                "cat": "INTERFACE & ZONES",
+                "desc": "Set trust level (100=trusted LAN, 50=DMZ, 0=untrusted WAN)",
+                "desc_th": "กำหนดระดับความปลอดภัย (100 สูงสุด LAN, 0 ต่ำสุด WAN)",
+                "example": "Firewall(config-if)# security-level 0"
+            },
+            {
+                "cmd": "ip address <ip> <mask>",
+                "cat": "INTERFACE & ZONES",
+                "desc": "Assign IPv4 address and subnet mask to firewall interface",
+                "desc_th": "กำหนดหมายเลข IP ให้กับพอร์ต Firewall",
+                "example": "Firewall(config-if)# ip address 203.0.113.2 255.255.255.0"
+            },
+            {
+                "cmd": "route <zone> 0.0.0.0 0.0.0.0 <gw>",
+                "cat": "ROUTING",
+                "desc": "Configure default route through WAN gateway to Internet ISP",
+                "desc_th": "กำหนดเส้นทาง Default Route ขาออก Internet",
+                "example": "Firewall(config)# route outside 0.0.0.0 0.0.0.0 203.0.113.1"
+            },
+            {
+                "cmd": "access-list <name> permit <proto> <src> <dst>",
+                "cat": "ACCESS CONTROL",
+                "desc": "Define stateful firewall access rule permitting inbound traffic",
+                "desc_th": "สร้างกฎความปลอดภัย (ACL) อนุญาตให้ทราฟฟิกไหลผ่าน",
+                "example": "Firewall(config)# access-list WAN_IN permit tcp any host 192.168.1.10 eq 80"
+            },
+            {
+                "cmd": "access-group <name> in interface <zone>",
+                "cat": "ACCESS CONTROL",
+                "desc": "Apply access list filter inbound on specified security zone",
+                "desc_th": "นำ Access List มาผูกใช้งานกับ Zone ที่ต้องการกรองข้อมูล",
+                "example": "Firewall(config)# access-group WAN_IN in interface outside"
+            },
+            {
+                "cmd": "nat (inside,outside) dynamic interface",
+                "cat": "NAT & PAT",
+                "desc": "Configure dynamic Hide NAT translating internal IPs to WAN IP",
+                "desc_th": "ตั้งค่า NAT แปลง IP ภายในทั้งหมดออกด้วย IP ขาภายนอก",
+                "example": "Firewall(config)# nat (inside,outside) dynamic interface"
+            },
+            {
+                "cmd": "show conn",
+                "cat": "MONITORING",
+                "desc": "Display active stateful TCP/UDP connection tracking table",
+                "desc_th": "แสดงรายการ Connection ปัจจุบันที่มีการเชื่อมต่อผ่าน Firewall",
+                "example": "Firewall# show conn"
+            },
+            {
+                "cmd": "show xlate",
+                "cat": "MONITORING",
+                "desc": "Display current active NAT address translations",
+                "desc_th": "แสดงตารางการแปลง IP (NAT Translation) ปัจจุบัน",
+                "example": "Firewall# show xlate"
+            }
+        ]
+    },
+    "laptop": {
+        "categories": ["ALL", "CLI COMMANDS", "DESKTOP APPS", "HARDWARE PORTS"],
+        "commands": [
+            {
+                "cmd": "ip a / ifconfig",
+                "cat": "CLI COMMANDS",
+                "desc": "View local network adapter status, IP address, and link state",
+                "desc_th": "ตรวจสอบสถานะการ์ดแลนและหมายเลข IP ของโน้ตบุ๊ก",
+                "example": "engineer:~$ ip a"
+            },
+            {
+                "cmd": "sudo dhclient eth0",
+                "cat": "CLI COMMANDS",
+                "desc": "Request automatic IP address from datacenter DHCP server",
+                "desc_th": "ขอรับหมายเลข IP อัตโนมัติจากการ์ดแลน eth0",
+                "example": "engineer:~$ sudo dhclient eth0"
+            },
+            {
+                "cmd": "ping -c 4 <target_ip>",
+                "cat": "CLI COMMANDS",
+                "desc": "Test network latency and reachability to target host",
+                "desc_th": "ทดสอบการเชื่อมต่อเครือข่ายไปยังอุปกรณ์เป้าหมาย",
+                "example": "engineer:~$ ping -c 4 192.168.1.1"
+            },
+            {
+                "cmd": "minicom -D /dev/ttyUSB0",
+                "cat": "CLI COMMANDS",
+                "desc": "Open Serial Console rollover terminal to Cisco equipment",
+                "desc_th": "เชื่อมต่อสาย Console Rollover เข้าพอร์ต Console ของสวิตช์/เราเตอร์",
+                "example": "engineer:~$ minicom -D /dev/ttyUSB0"
+            },
+            {
+                "cmd": "Web Browser",
+                "cat": "DESKTOP APPS",
+                "desc": "Access web GUI management portals for Firewalls, PDU, and switches",
+                "desc_th": "เปิดเบราว์เซอร์จัดการหน้าเว็บคอนฟิกอุปกรณ์เครือข่าย",
+                "example": "Click Web Browser icon on Laptop Desktop"
+            },
+            {
+                "cmd": "Network Settings",
+                "cat": "DESKTOP APPS",
+                "desc": "Configure IPv4 manual/DHCP via Ubuntu/Windows desktop GUI",
+                "desc_th": "ตั้งค่าเครือข่ายแบบกราฟิกผ่านหน้าต่าง Network Manager",
+                "example": "Open Settings -> Network -> IPv4 Settings"
+            },
+            {
+                "cmd": "Terminal Emulator",
+                "cat": "DESKTOP APPS",
+                "desc": "Run shell scripts, SSH sessions, and troubleshooting commands",
+                "desc_th": "เปิดโปรแกรม Terminal สำหรับพิมพ์คำสั่งตรวจสอบระบบ",
+                "example": "Click Terminal icon on Dock / Taskbar"
+            },
+            {
+                "cmd": "Wireshark",
+                "cat": "DESKTOP APPS",
+                "desc": "Capture and inspect live packets for protocol troubleshooting",
+                "desc_th": "ดักจับและวิเคราะห์แพ็กเก็ตเครือข่ายเชิงลึก",
+                "example": "Open Wireshark -> Select eth0 interface"
+            },
+            {
+                "cmd": "eth0 (Left Side RJ45)",
+                "cat": "HARDWARE PORTS",
+                "desc": "Gigabit Ethernet Cat6 patch cable port for data network access",
+                "desc_th": "พอร์ตแลน RJ45 ด้านซ้ายสำหรับเชื่อมต่อสายเคเบิลข้อมูล",
+                "example": "Plug blue/yellow Cat6 cable into left side"
+            },
+            {
+                "cmd": "con0 (Right Side Serial)",
+                "cat": "HARDWARE PORTS",
+                "desc": "Rollover console port for out-of-band serial management",
+                "desc_th": "พอร์ต Console ด้านขวาสำหรับสายฟ้าผ่า (Console Cable)",
+                "example": "Plug light-blue rollover cable into right side"
+            }
+        ]
+    },
+    "controls": {
+        "categories": ["ALL", "NAVIGATION", "CABLING & PORTS", "CLI & TERMINAL", "MANAGEMENT"],
+        "commands": [
+            {
+                "cmd": "W, A, S, D",
+                "cat": "NAVIGATION",
+                "desc": "Walk forward, strafe left, backward, strafe right in datacenter room",
+                "desc_th": "เดินหน้า ถอยหลัง เดินไปทางซ้ายและขวาในห้องดาต้าเซ็นเตอร์",
+                "example": "Use WASD keys for first-person movement"
+            },
+            {
+                "cmd": "Mouse Look",
+                "cat": "NAVIGATION",
+                "desc": "Rotate camera pitch and yaw / Aim crosshair at racks, devices, and ports",
+                "desc_th": "ขยับเมาส์เพื่อมองไปรอบห้อง เล็งเป้าที่ตู้ Rack อุปกรณ์ และพอร์ต",
+                "example": "Move mouse freely to aim crosshair"
+            },
+            {
+                "cmd": "Left Shift",
+                "cat": "NAVIGATION",
+                "desc": "Sprint / Walk 2x faster through datacenter aisles",
+                "desc_th": "กดค้างเพื่อวิ่งเร็วขึ้น 2 เท่าในทางเดินดาต้าเซ็นเตอร์",
+                "example": "Hold Left Shift while pressing WASD"
+            },
+            {
+                "cmd": "Left Ctrl",
+                "cat": "NAVIGATION",
+                "desc": "Toggle Crouch stance (lowers eye level to inspect bottom rack slots)",
+                "desc_th": "กดเพื่อย่อตัวลงตรวจดูอุปกรณ์ด้านล่างตู้ / กดอีกครั้งเพื่อลุกขึ้นยืน",
+                "example": "Press Left Ctrl once to crouch, again to stand"
+            },
+            {
+                "cmd": "[F11] Key",
+                "cat": "NAVIGATION",
+                "desc": "Toggle Fullscreen borderless display mode",
+                "desc_th": "สลับโหมดเต็มจอภาพ (Fullscreen)",
+                "example": "Press F11 anytime to toggle fullscreen"
+            },
+            {
+                "cmd": "[E] Key",
+                "cat": "CLI & TERMINAL",
+                "desc": "Open Cisco IOS / Linux Console Terminal for aimed device",
+                "desc_th": "เปิดหน้าต่าง CLI Console ของอุปกรณ์ที่เป้าเล็งอยู่",
+                "example": "Aim at Router, Switch, or Server and press [E]"
+            },
+            {
+                "cmd": "[F] Key",
+                "cat": "CABLING & PORTS",
+                "desc": "Pick up cable / Plug cable into aimed RJ45 or Console port",
+                "desc_th": "หยิบสายเคเบิล หรือเสียบสายเข้ากับพอร์ตที่กำลังเล็งอยู่",
+                "example": "Look at port until badge highlights, then press [F]"
+            },
+            {
+                "cmd": "[X] Key",
+                "cat": "CABLING & PORTS",
+                "desc": "Cancel and drop cable currently held in hand",
+                "desc_th": "ยกเลิกสายเคเบิลที่กำลังถืออยู่ในมือ",
+                "example": "Press [X] when holding a cable to cancel"
+            },
+            {
+                "cmd": "[O] Key",
+                "cat": "MANAGEMENT",
+                "desc": "Toggle Mission Objective & Concept Guide panel on/off",
+                "desc_th": "เปิดหรือปิดกล่องภารกิจและเนื้อหาความรู้บนหน้าจอ",
+                "example": "Press [O] to show/hide mission objectives"
+            },
+            {
+                "cmd": "[M] Key",
+                "cat": "MANAGEMENT",
+                "desc": "Open 2D Logical Network Topology Diagram",
+                "desc_th": "เปิดแผนภาพไดอะแกรมเครือข่าย 2 มิติ แสดงการเชื่อมโยงทั้งหมด",
+                "example": "Press [M] to open topology map, [ESC] to return"
+            },
+            {
+                "cmd": "[N] Key",
+                "cat": "MANAGEMENT",
+                "desc": "Open Rack Device Manager modal (Add/Remove devices in Sandbox)",
+                "desc_th": "เปิดหน้าต่างจัดการตู้ Rack เพิ่มหรือลบอุปกรณ์ในโหมด Sandbox",
+                "example": "Press [N] in Sandbox mode to manage devices"
+            },
+            {
+                "cmd": "[Del] / [Backspace]",
+                "cat": "MANAGEMENT",
+                "desc": "Quick Delete the aimed device from rack (Sandbox mode)",
+                "desc_th": "ลบอุปกรณ์ที่กำลังเล็งอยู่ออกจากตู้ Rack ทันที (โหมด Sandbox)",
+                "example": "Aim at device in Sandbox and press [Delete]"
+            },
+            {
+                "cmd": "[K] / [L] Keys",
+                "cat": "MANAGEMENT",
+                "desc": "Quick Save / Quick Load network topology JSON (Sandbox mode)",
+                "desc_th": "บันทึกหรือโหลดการจัดวางอุปกรณ์และสายเคเบิล (โหมด Sandbox)",
+                "example": "Press [K] to save topology, [L] to reload"
+            },
+            {
+                "cmd": "[ESC] Key",
+                "cat": "NAVIGATION",
+                "desc": "Detach active CLI terminal / Open Pause Menu / Return to Menu",
+                "desc_th": "ปิดหน้าต่าง Terminal / เปิดเมนูหยุดชั่วคราว / ย้อนกลับเมนูหลัก",
+                "example": "Global Escape key for back and pause"
+            }
+        ]
+    }
+}
+
 class MenuState:
     MAIN_MENU = "MAIN_MENU"
     IN_GAME = "IN_GAME"
@@ -33,6 +605,30 @@ class MenuManager:
         self.font_rack_micro = pygame.font.SysFont("Consolas", 9, bold=True) or pygame.font.Font(None, 11)
         self.font_rack_nano = pygame.font.SysFont("Consolas", 8) or pygame.font.Font(None, 10)
 
+        self.font_mono_bold = pygame.font.SysFont("Consolas", 12, bold=True) or pygame.font.Font(None, 15)
+        self.font_badge = pygame.font.SysFont("Segoe UI", 11, bold=True) or pygame.font.Font(None, 14)
+        self.font_cat = pygame.font.SysFont("Segoe UI", 12, bold=True) or pygame.font.Font(None, 15)
+        self.font_thai = pygame.font.SysFont("leelawadeeui,tahoma,angsanaupc", 12) or pygame.font.Font(None, 15)
+        self.font_thai_small = pygame.font.SysFont("leelawadeeui,tahoma,angsanaupc", 11) or pygame.font.Font(None, 14)
+
+        # Cheatsheet & Guide Dedicated High-Legibility Fonts (Enlarged)
+        self.font_guide_title = pygame.font.SysFont("Segoe UI", 26, bold=True) or pygame.font.Font(None, 32)
+        self.font_guide_sub = pygame.font.SysFont("Segoe UI", 13, bold=True) or pygame.font.Font(None, 17)
+        self.font_guide_tab = pygame.font.SysFont("Segoe UI", 14, bold=True) or pygame.font.Font(None, 18)
+        self.font_guide_dev_title = pygame.font.SysFont("Segoe UI", 16, bold=True) or pygame.font.Font(None, 20)
+        self.font_guide_badge = pygame.font.SysFont("Segoe UI", 11, bold=True) or pygame.font.Font(None, 14)
+        self.font_guide_rot = pygame.font.SysFont("Segoe UI", 12, bold=True) or pygame.font.Font(None, 15)
+        self.font_guide_spec_k = pygame.font.SysFont("Segoe UI", 11, bold=True) or pygame.font.Font(None, 14)
+        self.font_guide_spec_v = pygame.font.SysFont("Segoe UI", 13) or pygame.font.Font(None, 16)
+        self.font_guide_cat = pygame.font.SysFont("Segoe UI", 13, bold=True) or pygame.font.Font(None, 16)
+        self.font_guide_cmd = pygame.font.SysFont("Consolas", 14, bold=True) or pygame.font.Font(None, 17)
+        self.font_guide_card_tag = pygame.font.SysFont("Segoe UI", 11, bold=True) or pygame.font.Font(None, 14)
+        self.font_guide_desc = pygame.font.SysFont("Segoe UI", 13) or pygame.font.Font(None, 16)
+        self.font_thai_guide = pygame.font.SysFont("leelawadeeui,tahoma,angsanaupc", 13) or pygame.font.Font(None, 16)
+        self.font_guide_mono = pygame.font.SysFont("Consolas", 13) or pygame.font.Font(None, 16)
+        self.font_guide_btn = pygame.font.SysFont("Segoe UI", 14, bold=True) or pygame.font.Font(None, 17)
+        self.font_guide_hint = pygame.font.SysFont("Segoe UI", 12) or pygame.font.Font(None, 15)
+
         self.selected_button = 0
         self.menu_options = [
             ("TUTORIAL MODE", "Learn step-by-step from cabling to Cisco CLI"),
@@ -52,6 +648,156 @@ class MenuManager:
         self.dm_scroll_offset = 0
         self.dm_feedback = ""
         self.dm_feedback_color = (15, 140, 65)
+
+        # 3D Showcase & CLI Cheatsheet State
+        self.showcase_devices = []
+        self.showcase_selected_idx = 0
+        self.showcase_yaw = 25.0
+        self.showcase_pitch = 18.0
+        self.showcase_dragging = False
+        self.showcase_last_mouse = (0, 0)
+        self.showcase_cat_idx = 0
+        self.showcase_scroll_y = 0
+        self._max_scroll_y = 0
+        self.help_guide_prev_state = MenuState.MAIN_MENU
+        self._last_device_tab_rects = []
+        self._last_category_rects = []
+        self._last_back_btn_rect = None
+        self._init_showcase()
+
+    def _init_showcase(self):
+        # 1. Cisco 2911 Router
+        r1 = Router("sc_r1", hostname="R1-Core-Edge", rack_id=1, u_slot=10)
+        r1.is_showcase = True
+        r1.pos_x, r1.pos_y, r1.pos_z = 0.0, 0.0, 0.0
+        if "g0/0" in r1.ports:
+            r1.ports["g0/0"].is_shutdown = False
+        if "g0/1" in r1.ports:
+            r1.ports["g0/1"].is_shutdown = False
+
+        # 2. Cisco Catalyst 2960-X Switch
+        sw1 = Switch("sc_sw1", hostname="SW1-Dist-Access", rack_id=1, u_slot=14)
+        sw1.is_showcase = True
+        sw1.pos_x, sw1.pos_y, sw1.pos_z = 0.0, 0.0, 0.0
+        for p_name in ("g0/1", "g0/2", "g0/3", "g0/24"):
+            if p_name in sw1.ports:
+                sw1.ports[p_name].is_shutdown = False
+
+        # 3. Dell PowerEdge R750 Server
+        srv1 = Host("sc_srv1", hostname="SRV-DCIM-01", device_type="server", rack_id=2, u_slot=20)
+        srv1.is_showcase = True
+        srv1.pos_x, srv1.pos_y, srv1.pos_z = 0.0, 0.0, 0.0
+        srv1.is_powered = True
+        if "eth0" in srv1.ports:
+            srv1.ports["eth0"].is_shutdown = False
+
+        # 4. Fortinet FortiGate 100F Firewall
+        fw1 = Firewall("sc_fw1", hostname="FW-Perimeter", rack_id=2, u_slot=24)
+        fw1.is_showcase = True
+        fw1.pos_x, fw1.pos_y, fw1.pos_z = 0.0, 0.0, 0.0
+        for p_name in ("g0/0", "g0/1", "m0/0"):
+            if p_name in fw1.ports:
+                fw1.ports[p_name].is_shutdown = False
+
+        # 5. Field Engineer Laptop
+        lap1 = Host("sc_lap1", hostname="ADMIN-LAPTOP", device_type="laptop", os_type="ubuntu")
+        lap1.is_showcase = True
+        lap1.pos_x, lap1.pos_y, lap1.pos_z = 0.0, 0.0, 0.0
+        if "eth0" in lap1.ports:
+            lap1.ports["eth0"].is_shutdown = False
+        if "con0" in lap1.ports:
+            lap1.ports["con0"].is_shutdown = False
+
+        self.showcase_devices = [
+            {
+                "id": "router",
+                "label": "1. Cisco Router",
+                "device": r1,
+                "title": "Cisco 2911 Integrated Services Router (ISR G2)",
+                "form_factor": "19\" EIA 1U Rackmount",
+                "os": "Cisco IOS 15.7M",
+                "ports_desc": "3x GE RJ45, 1x Console, 2x EHWIC",
+                "power_desc": "Dual Redundant 100-240V AC PSUs",
+            },
+            {
+                "id": "switch",
+                "label": "2. Catalyst Switch",
+                "device": sw1,
+                "title": "Cisco Catalyst 2960-X Enterprise L2/L3 Switch",
+                "form_factor": "19\" EIA 1U Rackmount",
+                "os": "Cisco IOS-XE 16.9",
+                "ports_desc": "24x 10/100/1000 Ethernet, 2x SFP+ Uplinks",
+                "power_desc": "Dual Hot-Swap PSUs + FlexStack-Plus",
+            },
+            {
+                "id": "server",
+                "label": "3. PowerEdge Server",
+                "device": srv1,
+                "title": "Dell PowerEdge R750 Enterprise 2U Rack Server",
+                "form_factor": "19\" EIA 2U Heavy Chassis",
+                "os": "Ubuntu 22.04 LTS / RHEL 9",
+                "ports_desc": "4x 10GbE SFP28, 2x 1GbE, 1x iDRAC9 MGMT",
+                "power_desc": "Dual Titanium 1400W Redundant PSUs",
+            },
+            {
+                "id": "firewall",
+                "label": "4. FortiGate Firewall",
+                "device": fw1,
+                "title": "Fortinet FortiGate 100F Next-Gen Firewall",
+                "form_factor": "19\" EIA 1U Rackmount",
+                "os": "FortiOS 7.2 Enterprise",
+                "ports_desc": "2x 10GE SFP+, 4x GE SFP, 12x GE RJ45, MGMT",
+                "power_desc": "Dual Redundant Hot-Swap AC Feeds",
+            },
+            {
+                "id": "laptop",
+                "label": "5. Field Laptop",
+                "device": lap1,
+                "title": "Field Engineer Mobile NOC Diagnostics Workstation",
+                "form_factor": "15.6\" Rugged Mobile Workstation",
+                "os": "Ubuntu 22.04 LTS / Windows 11",
+                "ports_desc": "1x RJ45 Gigabit (eth0), 1x Serial Console (con0)",
+                "power_desc": "90W Li-Ion Fast-Charging Battery + AC",
+            },
+            {
+                "id": "controls",
+                "label": "6. Simulator Controls",
+                "device": r1,
+                "title": "Datacenter Simulator Controls & Keybindings",
+                "form_factor": "Full 3D Datacenter Simulation",
+                "os": "Antigravity Physics & Packet Engine",
+                "ports_desc": "Virtual Multi-Rack Datacenter & Patch Panels",
+                "power_desc": "Real-time 60 FPS Hardware OpenGL",
+            }
+        ]
+
+    def get_showcase_device(self):
+        if not hasattr(self, "showcase_devices") or not self.showcase_devices:
+            self._init_showcase()
+        idx = max(0, min(len(self.showcase_devices) - 1, getattr(self, "showcase_selected_idx", 0)))
+        dev = self.showcase_devices[idx]["device"]
+        if dev is None:
+            return self.showcase_devices[0]["device"]
+        return dev
+
+    def get_showcase_viewport(self, w, h):
+        content_y = 100
+        content_h = max(320, h - content_y - 44)
+        margin_x = max(20, (w - 1240) // 2) if w > 1240 else 20
+        content_w = w - margin_x * 2
+        left_w = int(content_w * 0.44)
+        left_x = margin_x
+        vp_x = left_x + 12
+        vp_y = content_y + 54
+        vp_w = left_w - 24
+        vp_h = max(180, content_h - 174)
+        return (vp_x, vp_y, vp_w, vp_h)
+
+    def update(self, dt):
+        if self.state == MenuState.HELP_GUIDE:
+            if not getattr(self, "showcase_dragging", False):
+                self.showcase_yaw = (getattr(self, "showcase_yaw", 25.0) + dt * 15.0) % 360.0
+
 
     def get_main_menu_button_rect(self, idx, w, h):
         bx = 48
@@ -226,12 +972,15 @@ class MenuManager:
                     self.state = MenuState.MAIN_MENU
                     return "TO_MAIN_MENU"
 
-        elif self.state in (MenuState.TOPOLOGY_MAP, MenuState.HELP_GUIDE):
+        elif self.state == MenuState.TOPOLOGY_MAP:
             if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1) or \
                (event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_m, pygame.K_RETURN, pygame.K_SPACE)):
                 sound_mgr.play_key()
-                self.state = MenuState.IN_GAME if self.state == MenuState.TOPOLOGY_MAP else MenuState.MAIN_MENU
-                return "RESUME" if self.state == MenuState.IN_GAME else None
+                self.state = MenuState.IN_GAME
+                return "RESUME"
+
+        elif self.state == MenuState.HELP_GUIDE:
+            return self._handle_help_guide_input(event, sound_mgr, screen_w, screen_h)
 
         elif self.state == MenuState.DEVICE_MANAGER:
             rects = self._compute_dm_rects(screen_w, screen_h)
@@ -393,11 +1142,116 @@ class MenuManager:
         elif idx == 2:
             return "SANDBOX"
         elif idx == 3:
+            self.help_guide_prev_state = MenuState.MAIN_MENU
             self.state = MenuState.HELP_GUIDE
             return None
         elif idx == 4:
             return "EXIT"
         return None
+
+    def _handle_help_guide_input(self, event, sound_mgr, screen_w, screen_h):
+        vp_rect = pygame.Rect(*self.get_showcase_viewport(screen_w, screen_h))
+
+        # 1. Mouse Button Down
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:
+                mouse_pos = event.pos
+
+                # Check device selector tabs
+                for idx, tab_rect in enumerate(getattr(self, "_last_device_tab_rects", [])):
+                    if tab_rect.collidepoint(mouse_pos):
+                        if self.showcase_selected_idx != idx:
+                            self.showcase_selected_idx = idx
+                            self.showcase_cat_idx = 0
+                            self.showcase_scroll_y = 0
+                            sound_mgr.play_key()
+                        return None
+
+                # Check 3D Viewport drag initiation
+                if vp_rect.collidepoint(mouse_pos):
+                    self.showcase_dragging = True
+                    self.showcase_last_mouse = mouse_pos
+                    return None
+
+                # Check Category Filter pills in right pane
+                for c_idx, cat_rect in enumerate(getattr(self, "_last_category_rects", [])):
+                    if cat_rect.collidepoint(mouse_pos):
+                        if self.showcase_cat_idx != c_idx:
+                            self.showcase_cat_idx = c_idx
+                            self.showcase_scroll_y = 0
+                            sound_mgr.play_key()
+                        return None
+
+                # Check Back button
+                back_rect = getattr(self, "_last_back_btn_rect", None)
+                if back_rect and back_rect.collidepoint(mouse_pos):
+                    sound_mgr.play_key()
+                    self.showcase_dragging = False
+                    self.state = getattr(self, "help_guide_prev_state", MenuState.MAIN_MENU)
+                    return "RESUME" if self.state == MenuState.IN_GAME else None
+
+            # Mouse wheel scroll (buttons 4 and 5) in command list
+            elif event.button == 4:
+                self.showcase_scroll_y = max(0, self.showcase_scroll_y - 45)
+            elif event.button == 5:
+                max_s = getattr(self, "_max_scroll_y", 0)
+                self.showcase_scroll_y = max(0, min(max_s, self.showcase_scroll_y + 45))
+
+        # 2. Mouse Button Up
+        elif event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 1:
+                self.showcase_dragging = False
+
+        # 3. Mouse Motion
+        elif event.type == pygame.MOUSEMOTION:
+            if getattr(self, "showcase_dragging", False):
+                dx = event.pos[0] - self.showcase_last_mouse[0]
+                dy = event.pos[1] - self.showcase_last_mouse[1]
+                self.showcase_yaw = (self.showcase_yaw + dx * 0.75) % 360.0
+                self.showcase_pitch = max(-80.0, min(80.0, self.showcase_pitch + dy * 0.75))
+                self.showcase_last_mouse = event.pos
+
+        # 4. Mouse Wheel (Vertical scroll in right pane - NO zoom per user request)
+        elif event.type == pygame.MOUSEWHEEL:
+            max_s = getattr(self, "_max_scroll_y", 0)
+            self.showcase_scroll_y = max(0, min(max_s, self.showcase_scroll_y - event.y * 45))
+
+        # 5. Keyboard Navigation
+        elif event.type == pygame.KEYDOWN:
+            if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE):
+                sound_mgr.play_key()
+                self.showcase_dragging = False
+                self.state = getattr(self, "help_guide_prev_state", MenuState.MAIN_MENU)
+                return "RESUME" if self.state == MenuState.IN_GAME else None
+
+            elif event.key in (pygame.K_1, pygame.K_KP1):
+                self.showcase_selected_idx = 0; self.showcase_cat_idx = 0; self.showcase_scroll_y = 0; sound_mgr.play_key()
+            elif event.key in (pygame.K_2, pygame.K_KP2):
+                self.showcase_selected_idx = 1; self.showcase_cat_idx = 0; self.showcase_scroll_y = 0; sound_mgr.play_key()
+            elif event.key in (pygame.K_3, pygame.K_KP3):
+                self.showcase_selected_idx = 2; self.showcase_cat_idx = 0; self.showcase_scroll_y = 0; sound_mgr.play_key()
+            elif event.key in (pygame.K_4, pygame.K_KP4):
+                self.showcase_selected_idx = 3; self.showcase_cat_idx = 0; self.showcase_scroll_y = 0; sound_mgr.play_key()
+            elif event.key in (pygame.K_5, pygame.K_KP5):
+                self.showcase_selected_idx = 4; self.showcase_cat_idx = 0; self.showcase_scroll_y = 0; sound_mgr.play_key()
+            elif event.key in (pygame.K_6, pygame.K_KP6):
+                self.showcase_selected_idx = 5; self.showcase_cat_idx = 0; self.showcase_scroll_y = 0; sound_mgr.play_key()
+
+            elif event.key in (pygame.K_LEFT, pygame.K_a):
+                self.showcase_selected_idx = (self.showcase_selected_idx - 1) % len(self.showcase_devices)
+                self.showcase_cat_idx = 0; self.showcase_scroll_y = 0; sound_mgr.play_key()
+            elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                self.showcase_selected_idx = (self.showcase_selected_idx + 1) % len(self.showcase_devices)
+                self.showcase_cat_idx = 0; self.showcase_scroll_y = 0; sound_mgr.play_key()
+
+            elif event.key in (pygame.K_UP, pygame.K_PAGEUP):
+                self.showcase_scroll_y = max(0, self.showcase_scroll_y - 45)
+            elif event.key in (pygame.K_DOWN, pygame.K_PAGEDOWN):
+                max_s = getattr(self, "_max_scroll_y", 0)
+                self.showcase_scroll_y = max(0, min(max_s, self.showcase_scroll_y + 45))
+
+        return None
+
 
     def render(self, surface, screen_w, screen_h, devices=None, cables=None, mode=None):
         if self.state == MenuState.MAIN_MENU:
@@ -1397,76 +2251,309 @@ class MenuManager:
         surface.blit(close_lbl, (cx - close_lbl.get_width() // 2, h - 40))
 
     def _render_help_guide(self, surface, w, h):
-        overlay = pygame.Surface((w, h), pygame.SRCALPHA)
-        overlay.fill((244, 247, 252, 250))
-        surface.blit(overlay, (0, 0))
+        now = pygame.time.get_ticks() / 1000.0
 
+        # 1. Clean Light Datacenter Backdrop Overlay
+        backdrop = pygame.Surface((w, h), pygame.SRCALPHA)
+        backdrop.fill((246, 249, 254, 250))
+        surface.blit(backdrop, (0, 0))
+
+        # Subtle blueprint grid lines
+        grid_color = (230, 238, 248)
+        for x in range(0, w, 32):
+            pygame.draw.line(surface, grid_color, (x, 0), (x, h), 1)
+        for y in range(0, h, 32):
+            pygame.draw.line(surface, grid_color, (0, y), (w, y), 1)
+
+        # 2. Main Title & Subtitle Header
         cx = w // 2
-        title = self.font_logo.render("CONTROLS & CISCO IOS CHEATSHEET", True, (16, 42, 82))
-        surface.blit(title, (cx - title.get_width() // 2, 35))
+        title = self.font_guide_title.render("CONTROLS & HARDWARE CLI CHEATSHEET", True, (15, 42, 82))
+        surface.blit(title, (cx - title.get_width() // 2, 8))
 
-        box_w = min(1000, w - 80)
-        box_rect = pygame.Rect(cx - box_w // 2, 95, box_w, h - 170)
-        pygame.draw.rect(surface, (255, 255, 255), box_rect, border_radius=10)
-        pygame.draw.rect(surface, (200, 215, 235), box_rect, width=1, border_radius=10)
+        sub_txt = "INTERACTIVE 3D DATACENTER APPLIANCE SHOWCASE & CLI COMMAND REFERENCE"
+        sub = self.font_guide_sub.render(sub_txt, True, (0, 102, 204))
+        surface.blit(sub, (cx - sub.get_width() // 2, 38))
 
-        # Left Column: Simulator Controls
-        col1_x = cx - box_w // 2 + 30
-        curr_y = 115
-        h1 = self.font_btn.render("SIMULATOR CONTROLS", True, (0, 102, 204))
-        surface.blit(h1, (col1_x, curr_y))
-        curr_y += 30
+        # 3. Top Device Selector Tabs
+        tabs_y = 60
+        tab_h = 32
+        total_tab_w = min(w - 48, 1200)
+        tab_w = total_tab_w // len(self.showcase_devices)
+        start_tab_x = (w - total_tab_w) // 2
 
-        controls = [
-            ("W, A, S, D", "Walk in Datacenter room (First-Person)"),
-            ("Mouse Look", "Rotate camera / Aim crosshair at racks & ports"),
-            ("Left Shift", "Sprint / Walk faster"),
-            ("[E] Key", "Open Cisco IOS Console Terminal for targeted device"),
-            ("[F] Key", "Pick up cable / Connect cable to selected port"),
-            ("[X] Key", "Cancel cable currently in hand"),
-            ("[N] Key", "Open Rack Device Manager (Add/Remove devices in Sandbox)"),
-            ("[Del] Key", "Quick Delete aimed device in Sandbox mode"),
-            ("[M] Key", "Toggle 2D Logical Network Topology diagram"),
-            ("[ESC] Key", "Detach CLI terminal / Open Pause Menu"),
-            ("[F11]", "Toggle Fullscreen mode")
+        mouse_pos = pygame.mouse.get_pos()
+        self._last_device_tab_rects = []
+
+        for idx, dev_info in enumerate(self.showcase_devices):
+            t_rect = pygame.Rect(start_tab_x + idx * tab_w, tabs_y, tab_w - 4, tab_h)
+            self._last_device_tab_rects.append(t_rect)
+
+            is_active = (idx == self.showcase_selected_idx)
+            is_hover = t_rect.collidepoint(mouse_pos)
+
+            if is_active:
+                pygame.draw.rect(surface, (0, 102, 204), t_rect, border_radius=6)
+                pygame.draw.rect(surface, (0, 75, 165), t_rect, width=1, border_radius=6)
+                # Cyan top indicator line
+                pygame.draw.line(surface, (0, 220, 255), (t_rect.x + 4, t_rect.y + 1), (t_rect.right - 4, t_rect.y + 1), 2)
+                t_col = (255, 255, 255)
+            elif is_hover:
+                pygame.draw.rect(surface, (238, 246, 255), t_rect, border_radius=6)
+                pygame.draw.rect(surface, (0, 120, 225), t_rect, width=1, border_radius=6)
+                t_col = (0, 85, 190)
+            else:
+                pygame.draw.rect(surface, (255, 255, 255), t_rect, border_radius=6)
+                pygame.draw.rect(surface, (212, 224, 238), t_rect, width=1, border_radius=6)
+                t_col = (55, 75, 105)
+
+            lbl = self.font_guide_tab.render(dev_info["label"], True, t_col)
+            surface.blit(lbl, (t_rect.centerx - lbl.get_width() // 2, t_rect.centery - lbl.get_height() // 2))
+
+        # 4. Main Body Layout (Left: 3D Viewport, Right: CLI Cheatsheet)
+        content_y = 100
+        content_h = max(320, h - content_y - 44)
+        margin_x = max(20, (w - 1240) // 2) if w > 1240 else 20
+        content_w = w - margin_x * 2
+
+        left_w = int(content_w * 0.44)
+        left_rect = pygame.Rect(margin_x, content_y, left_w, content_h)
+
+        right_x = left_rect.right + 12
+        right_w = content_w - left_w - 12
+        right_rect = pygame.Rect(right_x, content_y, right_w, content_h)
+
+        curr_dev_info = self.showcase_devices[self.showcase_selected_idx]
+        dev_key = curr_dev_info["id"]
+
+        # === LEFT PANE: 3D HARDWARE VIEWPORT ===
+        # Soft Drop Shadow & Clean White Card
+        pygame.draw.rect(surface, (212, 224, 238), (left_rect.x + 2, left_rect.y + 2, left_rect.w, left_rect.h), border_radius=8)
+        pygame.draw.rect(surface, (255, 255, 255), left_rect, border_radius=8)
+        pygame.draw.rect(surface, (205, 220, 238), left_rect, width=1, border_radius=8)
+
+        # Header Badge inside Left Pane
+        pulse = 0.80 + 0.20 * math.sin(now * 4.0)
+        pygame.draw.circle(surface, (15, int(185 * pulse), 75), (left_rect.x + 18, left_rect.y + 16), 5)
+
+        hdr_tag = self.font_guide_badge.render("LIVE 3D HARDWARE TURNTABLE", True, (0, 102, 204))
+        surface.blit(hdr_tag, (left_rect.x + 30, left_rect.y + 10))
+
+        # Device Model Title (Enlarged, rich navy)
+        d_title = self.font_guide_dev_title.render(curr_dev_info["title"], True, (15, 40, 75))
+        surface.blit(d_title, (left_rect.x + 14, left_rect.y + 26))
+
+        # 3D Viewport Rect (Must match get_showcase_viewport)
+        vp_x, vp_y, vp_w, vp_h = self.get_showcase_viewport(w, h)
+        vp_rect = pygame.Rect(vp_x, vp_y, vp_w, vp_h)
+
+        # Punch transparent hole so OpenGL 3D buffer shows through!
+        surface.fill((0, 0, 0, 0), vp_rect)
+
+        # Clean Studio Viewport Frame & Reticles
+        pygame.draw.rect(surface, (200, 216, 236), vp_rect, width=1)
+
+        # Sci-Fi Corner Brackets
+        crn_len = 14
+        crn_col = (0, 115, 230)
+        # Top-Left
+        pygame.draw.line(surface, crn_col, (vp_rect.left, vp_rect.top), (vp_rect.left + crn_len, vp_rect.top), 2)
+        pygame.draw.line(surface, crn_col, (vp_rect.left, vp_rect.top), (vp_rect.left + crn_len, vp_rect.top), 2)
+        # Top-Right
+        pygame.draw.line(surface, crn_col, (vp_rect.right - 1, vp_rect.top), (vp_rect.right - 1 - crn_len, vp_rect.top), 2)
+        pygame.draw.line(surface, crn_col, (vp_rect.right - 1, vp_rect.top), (vp_rect.right - 1, vp_rect.top + crn_len), 2)
+        # Bottom-Left
+        pygame.draw.line(surface, crn_col, (vp_rect.left, vp_rect.bottom - 1), (vp_rect.left + crn_len, vp_rect.bottom - 1), 2)
+        pygame.draw.line(surface, crn_col, (vp_rect.left, vp_rect.bottom - 1), (vp_rect.left, vp_rect.bottom - 1 - crn_len), 2)
+        # Bottom-Right
+        pygame.draw.line(surface, crn_col, (vp_rect.right - 1, vp_rect.bottom - 1), (vp_rect.right - 1 - crn_len, vp_rect.bottom - 1), 2)
+        pygame.draw.line(surface, crn_col, (vp_rect.right - 1, vp_rect.bottom - 1), (vp_rect.right - 1, vp_rect.bottom - 1 - crn_len), 2)
+
+        # Rotation interaction hint banner at bottom of 3D viewport (NO zoom text per user request)
+        rot_hint_rect = pygame.Rect(vp_x + 1, vp_y + vp_h - 24, vp_w - 2, 24)
+        surface.fill((242, 246, 252, 255), rot_hint_rect)
+        pygame.draw.line(surface, (205, 220, 238), (rot_hint_rect.left, rot_hint_rect.top), (rot_hint_rect.right, rot_hint_rect.top), 1)
+
+        rot_text = "↔ Drag Left Mouse to Rotate 360° (Turntable Yaw & Pitch)"
+        rot_lbl = self.font_guide_rot.render(rot_text, True, (0, 95, 195))
+        surface.blit(rot_lbl, (rot_hint_rect.centerx - rot_lbl.get_width() // 2, rot_hint_rect.centery - rot_lbl.get_height() // 2))
+
+        # Hardware Specifications Panel below Viewport
+        specs_y = vp_y + vp_h + 8
+        specs_h = max(80, left_rect.bottom - specs_y - 8)
+        specs_rect = pygame.Rect(vp_x, specs_y, vp_w, specs_h)
+        pygame.draw.rect(surface, (246, 250, 255), specs_rect, border_radius=6)
+        pygame.draw.rect(surface, (215, 228, 242), specs_rect, width=1, border_radius=6)
+
+        specs_items = [
+            ("FORM FACTOR", curr_dev_info["form_factor"]),
+            ("FIRMWARE / OS", curr_dev_info["os"]),
+            ("INTERFACES", curr_dev_info["ports_desc"]),
+            ("POWER SYSTEM", curr_dev_info["power_desc"]),
         ]
-        for key, desc in controls:
-            k_s = self.font_mono.render(f"{key:<14}", True, (0, 130, 70))
-            d_s = self.font_body.render(desc, True, (40, 55, 75))
-            surface.blit(k_s, (col1_x, curr_y))
-            surface.blit(d_s, (col1_x + 130, curr_y))
-            curr_y += 24
+        sp_mid_x = specs_rect.x + specs_rect.w // 2
+        for s_i, (k, val) in enumerate(specs_items):
+            sy = specs_rect.y + 8 + (s_i % 2) * 40
+            sx = specs_rect.x + 12 if s_i < 2 else sp_mid_x + 8
+            k_lbl = self.font_guide_spec_k.render(k, True, (0, 102, 204))
+            v_lbl = self.font_guide_spec_v.render(val, True, (30, 48, 72))
+            surface.blit(k_lbl, (sx, sy))
+            surface.blit(v_lbl, (sx, sy + 17))
 
-        # Right Column: Cisco CLI Commands
-        col2_x = cx + 20
-        curr_y = 115
-        h2 = self.font_btn.render("CISCO IOS COMMAND REFERENCE", True, (0, 102, 204))
-        surface.blit(h2, (col2_x, curr_y))
-        curr_y += 30
+        # === RIGHT PANE: CATEGORIZED CLI CHEATSHEET ===
+        # Soft Drop Shadow & Clean White Card
+        pygame.draw.rect(surface, (212, 224, 238), (right_rect.x + 2, right_rect.y + 2, right_rect.w, right_rect.h), border_radius=8)
+        pygame.draw.rect(surface, (255, 255, 255), right_rect, border_radius=8)
+        pygame.draw.rect(surface, (205, 220, 238), right_rect, width=1, border_radius=8)
 
-        cisco_cmds = [
-            ("enable", "Enter Privileged EXEC mode (Switch#)"),
-            ("configure terminal", "Enter Global Configuration mode"),
-            ("interface g0/1", "Select interface for configuration"),
-            ("ip address <ip> <mask>", "Assign IPv4 address to interface"),
-            ("no shutdown", "Bring interface administratively UP"),
-            ("vlan 10 -> name HR", "Create and name a Layer 2 VLAN"),
-            ("switchport mode access", "Set port to access mode"),
-            ("switchport access vlan 10", "Assign port to VLAN 10"),
-            ("ip route <net> <mask> <gw>", "Configure static route on Router"),
-            ("show ip interface brief", "Display summary of all interface states"),
-            ("show vlan brief", "Display active VLAN memberships"),
-            ("ping <target_ip>", "Send 5 ICMP Echo Requests to verify reachability")
-        ]
-        for cmd, desc in cisco_cmds:
-            c_s = self.font_mono.render(f"{cmd:<28}", True, (0, 102, 204))
-            d_s = self.font_body.render(desc, True, (40, 55, 75))
-            surface.blit(c_s, (col2_x, curr_y))
-            surface.blit(d_s, (col2_x + 230, curr_y))
-            curr_y += 24
+        # Category Filter Pills Bar
+        cat_data = SHOWCASE_COMMANDS.get(dev_key, SHOWCASE_COMMANDS["router"])
+        categories = cat_data["categories"]
 
-        close_hint = self.font_btn.render("Click anywhere or press [ESC] to Return to Menu", True, (90, 115, 145))
-        surface.blit(close_hint, (cx - close_hint.get_width() // 2, h - 55))
+        pills_y = right_rect.y + 10
+        pills_x = right_rect.x + 12
+        row_h = 28
+        self._last_category_rects = []
+
+        for c_idx, c_name in enumerate(categories):
+            is_active_cat = (c_idx == self.showcase_cat_idx)
+            pill_lbl = self.font_guide_cat.render(c_name, True, (255, 255, 255) if is_active_cat else (50, 75, 110))
+            pill_w = pill_lbl.get_width() + 18
+
+            # Wrap to next row if overflowing right boundary
+            if pills_x + pill_w > right_rect.right - 12 and pills_x > right_rect.x + 12:
+                pills_x = right_rect.x + 12
+                pills_y += row_h + 6
+
+            pill_r = pygame.Rect(pills_x, pills_y, pill_w, row_h)
+            self._last_category_rects.append(pill_r)
+            is_hover_cat = pill_r.collidepoint(mouse_pos)
+
+            if is_active_cat:
+                pygame.draw.rect(surface, (0, 102, 204), pill_r, border_radius=14)
+                pygame.draw.rect(surface, (0, 75, 165), pill_r, width=1, border_radius=14)
+            elif is_hover_cat:
+                pygame.draw.rect(surface, (232, 242, 255), pill_r, border_radius=14)
+                pygame.draw.rect(surface, (0, 120, 225), pill_r, width=1, border_radius=14)
+                pill_lbl = self.font_guide_cat.render(c_name, True, (0, 85, 185))
+            else:
+                pygame.draw.rect(surface, (242, 247, 253), pill_r, border_radius=14)
+                pygame.draw.rect(surface, (205, 220, 238), pill_r, width=1, border_radius=14)
+
+            surface.blit(pill_lbl, (pill_r.centerx - pill_lbl.get_width() // 2, pill_r.centery - pill_lbl.get_height() // 2))
+            pills_x += pill_w + 6
+
+        # Filter command items according to active category
+        active_cat_name = categories[min(len(categories) - 1, self.showcase_cat_idx)]
+        all_cmds = cat_data["commands"]
+        if active_cat_name == "ALL":
+            filtered_cmds = all_cmds
+        else:
+            filtered_cmds = [c for c in all_cmds if c.get("cat") == active_cat_name]
+
+        # Scrollable Cards Viewport
+        list_y = pills_y + row_h + 10
+        list_h = max(180, right_rect.bottom - list_y - 12)
+        list_w = right_rect.w - 24
+        list_rect = pygame.Rect(right_rect.x + 12, list_y, list_w, list_h)
+
+        card_h = 92
+        card_gap = 8
+        total_content_h = len(filtered_cmds) * (card_h + card_gap)
+        self._max_scroll_y = max(0, total_content_h - list_h)
+        self.showcase_scroll_y = max(0, min(self._max_scroll_y, self.showcase_scroll_y))
+
+        has_scrollbar = self._max_scroll_y > 0
+        actual_card_w = list_w - (14 if has_scrollbar else 0)
+
+        # Clip rendering to list_rect
+        surface.set_clip(list_rect)
+
+        for c_idx, cmd_item in enumerate(filtered_cmds):
+            card_y = list_rect.y + c_idx * (card_h + card_gap) - self.showcase_scroll_y
+            if card_y + card_h < list_rect.y or card_y > list_rect.bottom:
+                continue
+
+            card_r = pygame.Rect(list_rect.x, card_y, actual_card_w, card_h)
+            is_card_hover = card_r.collidepoint(mouse_pos)
+
+            # Card Background (Clean White & Soft Hover)
+            card_bg = (245, 250, 255) if is_card_hover else (255, 255, 255)
+            card_border = (0, 120, 225) if is_card_hover else (216, 228, 242)
+            pygame.draw.rect(surface, card_bg, card_r, border_radius=6)
+            pygame.draw.rect(surface, card_border, card_r, width=1, border_radius=6)
+
+            # Left accent highlight on hover
+            if is_card_hover:
+                pygame.draw.rect(surface, (0, 115, 230), (card_r.x, card_r.y, 4, card_r.h), border_top_left_radius=6, border_bottom_left_radius=6)
+
+            # Row 1: Command Syntax & Category Tag (Enlarged)
+            cmd_s = self.font_guide_cmd.render(cmd_item["cmd"], True, (10, 125, 60))
+            surface.blit(cmd_s, (card_r.x + 12, card_r.y + 7))
+
+            cat_s = self.font_guide_card_tag.render(cmd_item.get("cat", "GENERAL"), True, (0, 95, 195))
+            cat_tag_w = cat_s.get_width() + 12
+            cat_tag_r = pygame.Rect(card_r.right - cat_tag_w - 10, card_r.y + 7, cat_tag_w, 20)
+            pygame.draw.rect(surface, (235, 243, 255), cat_tag_r, border_radius=4)
+            pygame.draw.rect(surface, (195, 216, 242), cat_tag_r, width=1, border_radius=4)
+            surface.blit(cat_s, (cat_tag_r.centerx - cat_s.get_width() // 2, cat_tag_r.centery - cat_s.get_height() // 2))
+
+            # Row 2: English Description (Enlarged)
+            desc_en = cmd_item.get("desc", "")
+            desc_en_s = self.font_guide_desc.render(desc_en, True, (25, 42, 68))
+            surface.blit(desc_en_s, (card_r.x + 12, card_r.y + 28))
+
+            # Row 3: Thai Description (Enlarged, Native Thai font)
+            desc_th = cmd_item.get("desc_th", "")
+            if desc_th:
+                desc_th_s = self.font_thai_guide.render(desc_th, True, (45, 80, 125))
+                surface.blit(desc_th_s, (card_r.x + 12, card_r.y + 46))
+
+            # Row 4: Practical Example Console Box
+            ex_box_r = pygame.Rect(card_r.x + 10, card_r.y + 65, card_r.w - 20, 22)
+            pygame.draw.rect(surface, (242, 246, 252), ex_box_r, border_radius=4)
+            pygame.draw.rect(surface, (210, 224, 240), ex_box_r, width=1, border_radius=4)
+
+            ex_lbl = self.font_guide_mono.render(cmd_item.get("example", ""), True, (0, 90, 180))
+            surface.blit(ex_lbl, (ex_box_r.x + 8, ex_box_r.centery - ex_lbl.get_height() // 2))
+
+        surface.set_clip(None)
+
+        # Vertical Scrollbar on right edge of list
+        if has_scrollbar:
+            sb_track = pygame.Rect(list_rect.right - 8, list_rect.y, 6, list_h)
+            pygame.draw.rect(surface, (235, 242, 250), sb_track, border_radius=3)
+
+            thumb_ratio = max(0.12, min(1.0, float(list_h) / float(total_content_h)))
+            thumb_h = int(list_h * thumb_ratio)
+            thumb_y = list_rect.y + int((list_h - thumb_h) * (float(self.showcase_scroll_y) / float(self._max_scroll_y)))
+            sb_thumb = pygame.Rect(list_rect.right - 8, thumb_y, 6, thumb_h)
+            pygame.draw.rect(surface, (160, 185, 215), sb_thumb, border_radius=3)
+
+        # 5. Footer Bottom Bar
+        footer_y = h - 38
+
+        # Return to Menu Button
+        btn_w, btn_h = 190, 28
+        btn_r = pygame.Rect(right_rect.right - btn_w, footer_y, btn_w, btn_h)
+        self._last_back_btn_rect = btn_r
+        is_back_hover = btn_r.collidepoint(mouse_pos)
+
+        if is_back_hover:
+            pygame.draw.rect(surface, (0, 102, 204), btn_r, border_radius=5)
+            pygame.draw.rect(surface, (0, 75, 165), btn_r, width=1, border_radius=5)
+            b_col = (255, 255, 255)
+        else:
+            pygame.draw.rect(surface, (244, 248, 255), btn_r, border_radius=5)
+            pygame.draw.rect(surface, (0, 115, 230), btn_r, width=1, border_radius=5)
+            b_col = (0, 85, 195)
+
+        back_txt = self.font_guide_btn.render("[ESC] Return to Menu", True, b_col)
+        surface.blit(back_txt, (btn_r.centerx - back_txt.get_width() // 2, btn_r.centery - back_txt.get_height() // 2))
+
+        # Bottom Controls Hint
+        hint_text = "Shortcuts: [1-6] Select Device • [Drag Mouse] Rotate 360° • [Wheel / Up / Down] Scroll Cheatsheet"
+        hint_lbl = self.font_guide_hint.render(hint_text, True, (80, 105, 135))
+        surface.blit(hint_lbl, (margin_x, footer_y + 6))
 
     def _render_device_manager(self, surface, w, h, mode):
         """Renders the comprehensive Rack Device Manager modal overlay for Sandbox Mode."""

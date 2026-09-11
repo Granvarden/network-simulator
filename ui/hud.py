@@ -52,23 +52,48 @@ class HUD:
         # 1. Precision Targeting Reticle / Crosshair
         self._draw_crosshair(surface, cx, cy, focused_dev, focused_port, held_cable_port, now)
 
-        # 2. Floating Context Action Prompt (Under crosshair)
+        # 2. Context Action Prompt (Positioned directly on top of the Hardware Inspector Card)
+        insp_w = 340
+        insp_h = 190
+        insp_x = screen_w - 360
+        insp_y = screen_h - 225
+        insp_right = insp_x + insp_w
+
+        prompt_data = None
         if held_cable_port:
             txt = f"CABLE HELD: {held_cable_port.device.hostname} [{held_cable_port.name}] -> Aim at peer port + [F] to Connect (or [X] to Cancel)"
-            self._draw_badge(surface, cx, cy + 38, txt, bg_color=(235, 246, 255), border_color=(0, 115, 230), text_color=(0, 70, 160))
+            prompt_data = (txt, (235, 246, 255), (0, 115, 230), (0, 70, 160))
         elif focused_port:
             peer = focused_port.cable.get_peer_port(focused_port) if focused_port.cable else None
             cable_info = f"-> Linked to {peer.device.hostname}:{peer.name}" if peer else "[Unconnected Port]"
             txt = f"[F] Plug/Unplug Cable | {focused_port.name.upper()} {cable_info}"
-            self._draw_badge(surface, cx, cy + 38, txt, bg_color=(240, 252, 244), border_color=(15, 160, 75), text_color=(10, 110, 50))
+            prompt_data = (txt, (240, 252, 244), (15, 160, 75), (10, 110, 50))
         elif focused_dev:
             if focused_dev.device_type == "laptop":
                 os_title = "Windows 11 Pro" if getattr(focused_dev, "os_type", "windows") == "windows" else "Ubuntu 22.04 LTS"
                 txt = f"[E] Open {os_title} Desktop GUI ({focused_dev.hostname}) | [F] Cable Ports"
-                self._draw_badge(surface, cx, cy + 38, txt, bg_color=(240, 248, 255), border_color=(0, 115, 230), text_color=(0, 60, 140))
+                prompt_data = (txt, (240, 248, 255), (0, 115, 230), (0, 60, 140))
             else:
                 txt = f"[E] Cisco/Host CLI Console ({focused_dev.hostname}) | [F] Cable Ports | [Del] Delete"
-                self._draw_badge(surface, cx, cy + 38, txt, bg_color=(255, 255, 255), border_color=(0, 115, 230), text_color=(15, 45, 90))
+                prompt_data = (txt, (255, 255, 255), (0, 115, 230), (15, 45, 90))
+
+        if prompt_data:
+            txt, bg_c, border_c, text_c = prompt_data
+            tw, th = self.font_bold.size(txt)
+            w = tw + 28
+            h = th + 14
+            if focused_dev:
+                # Positioned directly on top of the Hardware Inspector Card
+                if w <= insp_w:
+                    rx = insp_x + (insp_w - w) // 2
+                else:
+                    rx = insp_right - w
+                rx = max(20, rx)
+                ry = insp_y - h - 8
+            else:
+                rx = cx - w // 2
+                ry = cy + 38
+            self._draw_badge(surface, 0, 0, txt, bg_color=bg_c, border_color=border_c, text_color=text_c, rx=rx, ry=ry)
 
         # 4. Quick Device Hardware Inspector Card (Bottom-Right)
         if focused_dev:
@@ -188,13 +213,15 @@ class HUD:
             by = y + box_h - 9 - bar_h
             pygame.draw.rect(surface, (0, 125, 230), (bx, by, 4, bar_h), border_radius=1)
 
-    def _draw_badge(self, surface, x, y, text, bg_color, border_color, text_color):
+    def _draw_badge(self, surface, x, y, text, bg_color, border_color, text_color, rx=None, ry=None):
         surf = self.font_bold.render(text, True, text_color)
         pad_x, pad_y = 14, 7
         w = surf.get_width() + pad_x * 2
         h = surf.get_height() + pad_y * 2
-        rx = x - w // 2
-        ry = y
+        if rx is None:
+            rx = x - w // 2
+        if ry is None:
+            ry = y
         badge_rect = pygame.Rect(rx, ry, w, h)
         shadow_rect = pygame.Rect(rx + 2, ry + 2, w, h)
         pygame.draw.rect(surface, (200, 215, 235), shadow_rect, border_radius=6)
@@ -422,8 +449,8 @@ class HUD:
         pygame.draw.line(surface, (215, 226, 240), (0, screen_h - bar_h), (screen_w, screen_h - bar_h), 1)
 
         if is_sandbox:
-            controls = "[WASD] Move   [C] Crouch   [E] CLI   [F] Cable   [N] Rack Manager (Add/Remove)   [Del] Quick Delete   [M] 2D Map   [K] Save   [L] Load   [P] Pause"
+            controls = "[WASD] Move   [Ctrl] Crouch   [E] CLI   [F] Cable   [N] Rack Manager (Add/Remove)   [Del] Quick Delete   [M] 2D Map   [K] Save   [L] Load   [P] Pause"
         else:
-            controls = "[WASD] Move   [C] Crouch   [Mouse] Look   [E] Terminal   [F] Cable Action   [O] Mission   [M] 2D Topology   [P] Pause Menu   [F11] Fullscreen"
+            controls = "[WASD] Move   [Ctrl] Crouch   [Mouse] Look   [E] Terminal   [F] Cable Action   [O] Mission   [M] 2D Topology   [P] Pause Menu   [F11] Fullscreen"
         ctrl_surf = self.font_main.render(controls, True, (50, 75, 105))
         surface.blit(ctrl_surf, (20, screen_h - bar_h + 6))

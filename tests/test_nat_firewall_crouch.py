@@ -1,6 +1,6 @@
 """
 tests/test_nat_firewall_crouch.py - Comprehensive Unit & Integration Tests for:
-1. Camera Crouch Mechanic ([C] Key)
+1. Camera Crouch Toggle Mechanic ([Ctrl] Key)
 2. Cisco IOS NAT/PAT Overload & Public Internet ICMP Routing (8.8.8.8)
 3. Cisco ASA Stateful Firewall (Security Levels, Connection Table, ACLs)
 4. Sandbox Device Management for Firewalls
@@ -38,24 +38,40 @@ def test_camera_crouch():
         def __getitem__(self, k):
             return k in self.pressed
 
-    # 1. Update with no keys pressed
+    # 1. Update with no keys pressed -> standing
     cam.update(MockKeys(set()), dt=0.1, pygame_module=pygame)
     assert not cam.is_crouching
     assert abs(cam.y - 1.65) < 0.05
 
-    # 2. Press [C] key -> crouch begins, y smoothly lerps down towards 0.85
-    for _ in range(30):
-        cam.update(MockKeys({pygame.K_c}), dt=0.05, pygame_module=pygame)
+    # 2. Press [Ctrl] key once -> crouch toggles ON
+    cam.update(MockKeys({pygame.K_LCTRL}), dt=0.05, pygame_module=pygame)
     assert cam.is_crouching
-    assert abs(cam.y - 0.85) < 0.05, f"Expected height ~0.85, got {cam.y}"
 
-    # 3. Release [C] key -> returns smoothly to 1.65
+    # 3. Release [Ctrl] key -> remains crouching (stays crouched)!
     for _ in range(30):
         cam.update(MockKeys(set()), dt=0.05, pygame_module=pygame)
+    assert cam.is_crouching, "Camera should stay crouched after releasing Ctrl"
+    assert abs(cam.y - 0.85) < 0.05, f"Expected height ~0.85, got {cam.y}"
+
+    # 4. Press [Ctrl] key a second time -> crouch toggles OFF (stands up)
+    cam.update(MockKeys({pygame.K_LCTRL}), dt=0.05, pygame_module=pygame)
     assert not cam.is_crouching
+
+    # 5. Release [Ctrl] key -> remains standing!
+    for _ in range(30):
+        cam.update(MockKeys(set()), dt=0.05, pygame_module=pygame)
+    assert not cam.is_crouching, "Camera should stay standing after releasing Ctrl"
     assert abs(cam.y - 1.65) < 0.05, f"Expected height ~1.65, got {cam.y}"
 
-    print("Camera Crouch mechanic verified successfully!")
+    # 6. Test Right Ctrl (K_RCTRL) toggle
+    cam.update(MockKeys({pygame.K_RCTRL}), dt=0.05, pygame_module=pygame)
+    assert cam.is_crouching
+    cam.update(MockKeys(set()), dt=0.05, pygame_module=pygame)
+    assert cam.is_crouching
+    cam.update(MockKeys({pygame.K_RCTRL}), dt=0.05, pygame_module=pygame)
+    assert not cam.is_crouching
+
+    print("Camera Crouch toggle mechanic verified successfully!")
 
 def test_cisco_nat_and_internet():
     print("\n--- Testing Cisco IOS NAT/PAT & Internet Ping ---")
