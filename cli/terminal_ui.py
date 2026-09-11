@@ -75,11 +75,17 @@ class TerminalUI:
         self.is_open = True
         self.input_buffer = ""
         self.cursor_pos = 0
-        pygame.key.set_repeat(280, 28)
+        try:
+            pygame.key.set_repeat(280, 28)
+        except pygame.error:
+            pass
 
     def close(self):
         self.is_open = False
-        pygame.key.set_repeat(0)
+        try:
+            pygame.key.set_repeat(0)
+        except pygame.error:
+            pass
 
     def abort_job(self):
         """Aborts currently active running job (Ctrl+C / Escape)."""

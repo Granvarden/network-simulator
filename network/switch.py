@@ -1,10 +1,18 @@
 """
-network/switch.py - Layer 2 Managed Switch with VLANs and MAC Table
-Simulates Cisco Catalyst / Nexus style Layer 2 switching.
+network/switch.py - Layer 2 Managed Switch with VLANs, MAC Table, and Spanning Tree Protocol (STP)
+Simulates Cisco Catalyst / Nexus style Layer 2 switching with IEEE 802.1D Spanning Tree.
 """
 
 import time
 from .device import BaseDevice
+
+def normalize_mac(mac_str):
+    if not mac_str:
+        return "00:00:00:00:00:00"
+    clean = mac_str.lower().replace(".", "").replace("-", "").replace(":", "")
+    if len(clean) == 12:
+        return ":".join(clean[i:i+2] for i in range(0, 12, 2))
+    return mac_str.lower()
 
 class Switch(BaseDevice):
     def __init__(self, id, hostname="Switch", rack_id=1, u_slot=24, num_ports=8):
@@ -19,6 +27,15 @@ class Switch(BaseDevice):
         # MAC Address Table: mac -> {"port": port_name, "vlan": vlan_id, "timestamp": float}
         self.mac_table = {}
 
+        # STP (Spanning Tree Protocol - IEEE 802.1D)
+        self.stp_enabled = True
+        self.stp_priority = 32768
+        self.mac_address = f"00:11:22:33:{(hash(str(self.id)) & 0xFF):02x}:01"
+        self.root_bridge_id = None
+        self.root_path_cost = 0
+        self.root_port = None
+        self._stp_dirty = True
+
         # Initialize ports (e.g. g0/1 to g0/8)
         for i in range(1, num_ports + 1):
             p = self.add_port(f"g0/{i}", port_type="RJ45")
@@ -27,10 +44,25 @@ class Switch(BaseDevice):
             p.mode = "access"
             p.access_vlan = 1
             p.trunk_allowed_vlans = {1}
+            p.stp_state = "Forwarding"
+            p.stp_role = "Designated"
+            p.stp_cost = 4
 
         # Console port
         con = self.add_port("con0", port_type="CONSOLE")
         con.is_shutdown = False
+
+    @property
+    def bridge_id(self):
+        """Returns the Bridge ID tuple: (Priority, Normalized MAC)."""
+        return (int(self.stp_priority), normalize_mac(self.mac_address))
+
+    @property
+    def is_root_bridge(self):
+        """Returns True if this switch is currently the Root Bridge."""
+        if self.root_bridge_id is None:
+            return True
+        return self.bridge_id == self.root_bridge_id
 
     def get_port_local_pos(self, port_name, port_index=0):
         """Returns exact local coordinates (x, y, z) on Switch front face."""
@@ -67,7 +99,168 @@ class Switch(BaseDevice):
                 if port.access_vlan == vlan_id:
                     port.access_vlan = 1
 
+    def get_connected_switches(self):
+        """Discovers all reachable switches in the same Layer 2 network component via cables."""
+        visited = set()
+        queue = [self]
+        visited.add(self)
+        while queue:
+            curr = queue.pop(0)
+            for p in curr.ports.values():
+                if p.is_shutdown or not p.cable or p.cable.is_damaged:
+                    continue
+                peer = p.cable.get_peer_port(p)
+                if peer and not peer.is_shutdown and isinstance(peer.device, Switch):
+                    if peer.device not in visited:
+                        visited.add(peer.device)
+                        queue.append(peer.device)
+        return list(visited)
+
+    def recalculate_stp(self):
+        """
+        Calculates IEEE 802.1D Spanning Tree for the connected switch topology.
+        Determines Root Bridge, Root Ports, Designated Ports, and Alternate (Blocking) Ports.
+        """
+        switches = self.get_connected_switches()
+        if not switches:
+            return
+
+        # 1. Elect Root Bridge (Lowest Bridge ID: Priority first, then MAC)
+        root_bridge = min(switches, key=lambda s: s.bridge_id)
+
+        # 2. Dijkstra: Shortest Path to Root Bridge (Root Path Cost)
+        root_path_cost = {s: float("inf") for s in switches}
+        root_path_cost[root_bridge] = 0
+
+        unvisited = set(switches)
+        while unvisited:
+            curr = min(unvisited, key=lambda s: (root_path_cost[s], s.bridge_id))
+            unvisited.remove(curr)
+            curr_cost = root_path_cost[curr]
+            if curr_cost == float("inf"):
+                break
+
+            for p in curr.ports.values():
+                if p.is_shutdown or not p.cable or p.cable.is_damaged:
+                    continue
+                peer = p.cable.get_peer_port(p)
+                if peer and not peer.is_shutdown and isinstance(peer.device, Switch) and peer.device in switches:
+                    neighbor = peer.device
+                    alt_cost = curr_cost + p.stp_cost
+                    if alt_cost < root_path_cost[neighbor]:
+                        root_path_cost[neighbor] = alt_cost
+
+        # 3. Choose Root Port for each non-root switch
+        for s in switches:
+            s.root_bridge_id = root_bridge.bridge_id
+            s.root_path_cost = root_path_cost[s]
+            s._stp_dirty = False
+
+            if s == root_bridge:
+                s.root_port = None
+            else:
+                candidates = []
+                for p in s.ports.values():
+                    if p.is_shutdown or not p.cable or p.cable.is_damaged:
+                        continue
+                    peer = p.cable.get_peer_port(p)
+                    if peer and not peer.is_shutdown and isinstance(peer.device, Switch) and peer.device in switches:
+                        neighbor = peer.device
+                        total_cost = root_path_cost[neighbor] + p.stp_cost
+                        # Tie-breaking order (IEEE 802.1D):
+                        # 1. Lowest Root Path Cost
+                        # 2. Lowest Neighbor Bridge ID
+                        # 3. Lowest Neighbor Port Index
+                        # 4. Lowest Local Port Index
+                        cand_key = (total_cost, neighbor.bridge_id, peer.port_index, p.port_index)
+                        candidates.append((cand_key, p))
+                if candidates:
+                    candidates.sort(key=lambda x: x[0])
+                    s.root_port = candidates[0][1]
+                else:
+                    s.root_port = None
+
+        # 4. Assign default roles and states for all ports
+        for s in switches:
+            for p in s.ports.values():
+                if p.is_shutdown:
+                    p.stp_role = "Disabled"
+                    p.stp_state = "Disabled"
+                    continue
+                if p.cable and p.cable.is_damaged:
+                    p.stp_role = "Disabled"
+                    p.stp_state = "Disabled"
+                    continue
+                peer = p.cable.get_peer_port(p) if p.cable else None
+                if peer and peer.is_shutdown:
+                    p.stp_role = "Disabled"
+                    p.stp_state = "Disabled"
+                    continue
+                # For all non-shutdown ports, default to Designated / Forwarding
+                p.stp_role = "Designated"
+                p.stp_state = "Forwarding"
+
+        # 5. Evaluate all Switch-to-Switch links
+        evaluated_links = set()
+        for s in switches:
+            for p in s.ports.values():
+                if p.is_shutdown or not p.cable or p.cable.is_damaged:
+                    continue
+                peer = p.cable.get_peer_port(p)
+                if not peer or peer.is_shutdown or not isinstance(peer.device, Switch) or peer.device not in switches:
+                    continue
+
+                link_id = tuple(sorted([(s.id, p.name), (peer.device.id, peer.name)]))
+                if link_id in evaluated_links:
+                    continue
+                evaluated_links.add(link_id)
+
+                sw_a, port_a = s, p
+                sw_b, port_b = peer.device, peer
+
+                is_rp_a = (port_a == sw_a.root_port)
+                is_rp_b = (port_b == sw_b.root_port)
+
+                if is_rp_a and is_rp_b:
+                    port_a.stp_role = "Root"
+                    port_a.stp_state = "Forwarding"
+                    port_b.stp_role = "Root"
+                    port_b.stp_state = "Forwarding"
+                elif is_rp_a:
+                    port_a.stp_role = "Root"
+                    port_a.stp_state = "Forwarding"
+                    port_b.stp_role = "Designated"
+                    port_b.stp_state = "Forwarding"
+                elif is_rp_b:
+                    port_b.stp_role = "Root"
+                    port_b.stp_state = "Forwarding"
+                    port_a.stp_role = "Designated"
+                    port_a.stp_state = "Forwarding"
+                else:
+                    # Neither is Root Port: potential loop segment
+                    # Elect Designated Bridge:
+                    # 1. Lowest root_path_cost
+                    # 2. Lowest bridge_id
+                    # 3. Lowest port_index
+                    key_a = (sw_a.root_path_cost, sw_a.bridge_id, port_a.port_index)
+                    key_b = (sw_b.root_path_cost, sw_b.bridge_id, port_b.port_index)
+
+                    if key_a < key_b:
+                        port_a.stp_role = "Designated"
+                        port_a.stp_state = "Forwarding"
+                        port_b.stp_role = "Alternate"
+                        port_b.stp_state = "Blocking"
+                    else:
+                        port_b.stp_role = "Designated"
+                        port_b.stp_state = "Forwarding"
+                        port_a.stp_role = "Alternate"
+                        port_a.stp_state = "Blocking"
+
     def learn_mac(self, mac, port_name, vlan_id):
+        """Records source MAC in MAC table, respecting STP blocking state."""
+        port = self.get_port(port_name)
+        if port and self.stp_enabled and getattr(port, "stp_state", "Forwarding") == "Blocking":
+            return
         self.mac_table[mac] = {
             "port": port_name,
             "vlan": vlan_id,
@@ -75,18 +268,31 @@ class Switch(BaseDevice):
         }
 
     def forward_packet(self, in_port, src_mac, dst_mac, vlan_id):
-        """Simulates frame forwarding logic with MAC learning and broadcast/unicast."""
-        # 1. Learn source MAC
-        self.learn_mac(src_mac, in_port.name, vlan_id)
+        """Simulates frame forwarding logic with MAC learning, STP blocking, and broadcast/unicast."""
+        if self.stp_enabled:
+            if self._stp_dirty or self.root_bridge_id is None:
+                self.recalculate_stp()
+
+        # 0. Check if incoming port is in Blocking state
+        if self.stp_enabled and getattr(in_port, "stp_state", "Forwarding") == "Blocking":
+            return []
+
+        # 1. Learn source MAC (only if port is in Forwarding state)
+        if (not self.stp_enabled) or getattr(in_port, "stp_state", "Forwarding") == "Forwarding":
+            self.learn_mac(src_mac, in_port.name, vlan_id)
         in_port.trigger_traffic()
 
         # 2. Check destination MAC
         if dst_mac == "FF:FF:FF:FF:FF:FF" or dst_mac not in self.mac_table:
-            # Broadcast / Flood to all ports participating in this VLAN
+            # Broadcast / Flood to all ports participating in this VLAN in Forwarding state
             out_ports = []
             for p_name, port in self.ports.items():
                 if port == in_port or port.is_shutdown or not port.cable:
                     continue
+                # STP check
+                if self.stp_enabled and getattr(port, "stp_state", "Forwarding") != "Forwarding":
+                    continue
+                # VLAN check
                 if port.mode == "access" and port.access_vlan == vlan_id:
                     out_ports.append(port)
                 elif port.mode == "trunk" and (vlan_id in port.trunk_allowed_vlans or not port.trunk_allowed_vlans):
@@ -98,6 +304,9 @@ class Switch(BaseDevice):
             target_port_name = entry["port"]
             target_port = self.get_port(target_port_name)
             if target_port and not target_port.is_shutdown and target_port.cable:
+                # STP check
+                if self.stp_enabled and getattr(target_port, "stp_state", "Forwarding") != "Forwarding":
+                    return []
                 # Check VLAN membership
                 if target_port.mode == "access" and target_port.access_vlan == vlan_id:
                     return [target_port]

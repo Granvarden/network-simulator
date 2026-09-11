@@ -199,9 +199,9 @@
           "vlan": 1
         },
         "g0/1": {
-          "ip": "192.168.1.1",
-          "mask": "255.255.255.0",
-          "shutdown": false,
+          "ip": null,
+          "mask": null,
+          "shutdown": true,
           "mode": "access",
           "vlan": 1
         },
@@ -244,14 +244,14 @@
         "g0/0": {
           "ip": null,
           "mask": null,
-          "shutdown": false,
+          "shutdown": true,
           "mode": "access",
           "vlan": 1
         },
         "g0/1": {
           "ip": null,
           "mask": null,
-          "shutdown": false,
+          "shutdown": true,
           "mode": "access",
           "vlan": 1
         },
@@ -446,7 +446,7 @@
       "num_ports": 1,
       "ports": {
         "eth0": {
-          "ip": "192.168.1.99",
+          "ip": "192.168.10.10",
           "mask": "255.255.255.0",
           "shutdown": false,
           "mode": "access",
@@ -460,7 +460,7 @@
           "vlan": 1
         }
       },
-      "gateway": "192.168.1.1",
+      "gateway": "192.168.10.1",
       "os_type": "windows",
       "dns_server": "8.8.8.8",
       "pos": [
@@ -478,7 +478,7 @@
       "num_ports": 1,
       "ports": {
         "eth0": {
-          "ip": "192.168.1.100",
+          "ip": "192.168.10.20",
           "mask": "255.255.255.0",
           "shutdown": false,
           "mode": "access",
@@ -492,7 +492,7 @@
           "vlan": 1
         }
       },
-      "gateway": "192.168.1.1",
+      "gateway": "192.168.10.1",
       "os_type": "ubuntu",
       "dns_server": "8.8.8.8",
       "pos": [
@@ -500,16 +500,92 @@
         0.77,
         0.5
       ]
+    },
+    {
+      "id": "sw_12",
+      "hostname": "Switch-012",
+      "type": "switch",
+      "rack_id": 1,
+      "u_slot": 26,
+      "num_ports": 8,
+      "ports": {
+        "g0/1": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/2": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/3": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/4": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/5": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/6": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/7": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "g0/8": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        },
+        "con0": {
+          "ip": null,
+          "mask": null,
+          "shutdown": false,
+          "mode": "access",
+          "vlan": 1
+        }
+      },
+      "vlans": {
+        "1": {
+          "name": "default",
+          "status": "active"
+        },
+        "10": {
+          "name": "USERS",
+          "status": "active"
+        }
+      }
     }
   ],
   "cables": [
-    {
-      "from_dev": "sw1",
-      "from_port": "g0/8",
-      "to_dev": "sw2",
-      "to_port": "g0/8",
-      "type": "CAT6"
-    },
     {
       "from_dev": "rtr1",
       "from_port": "g0/0",
@@ -518,17 +594,38 @@
       "type": "CAT6"
     },
     {
-      "from_dev": "lap1",
-      "from_port": "con0",
-      "to_dev": "rtr2",
-      "to_port": "g0/0",
-      "type": "CONSOLE"
+      "from_dev": "sw_12",
+      "from_port": "g0/1",
+      "to_dev": "sw1",
+      "to_port": "g0/1",
+      "type": "CAT6"
     },
     {
-      "from_dev": "rtr1",
-      "from_port": "g0/1",
-      "to_dev": "rtr2",
+      "from_dev": "sw_12",
+      "from_port": "g0/2",
+      "to_dev": "sw2",
       "to_port": "g0/1",
+      "type": "CAT6"
+    },
+    {
+      "from_dev": "sw1",
+      "from_port": "g0/2",
+      "to_dev": "sw2",
+      "to_port": "g0/2",
+      "type": "CAT6"
+    },
+    {
+      "from_dev": "sw1",
+      "from_port": "g0/3",
+      "to_dev": "lap1",
+      "to_port": "eth0",
+      "type": "CAT6"
+    },
+    {
+      "from_dev": "lap2",
+      "from_port": "eth0",
+      "to_dev": "sw2",
+      "to_port": "g0/3",
       "type": "CAT6"
     }
   ]

@@ -124,6 +124,8 @@ class Firewall(BaseDevice):
         return None
 
     def add_static_route(self, network, mask, next_hop_or_int, interface=None):
+        network = network.strip()
+        mask = mask.strip()
         self.routes = [r for r in self.routes if not (r["network"] == network and r["mask"] == mask)]
         is_ip = "." in next_hop_or_int and not next_hop_or_int.lower().startswith("g")
         route = {
@@ -134,6 +136,20 @@ class Firewall(BaseDevice):
             "type": "S"
         }
         self.routes.append(route)
+
+    def remove_static_route(self, network, mask, next_hop_or_int=None, interface=None):
+        network = network.strip()
+        mask = mask.strip()
+        orig_len = len(self.routes)
+        if next_hop_or_int:
+            clean = next_hop_or_int.strip()
+            self.routes = [r for r in self.routes if not (
+                r["network"] == network and r["mask"] == mask and
+                (r.get("next_hop") == clean or r.get("interface") == clean)
+            )]
+        else:
+            self.routes = [r for r in self.routes if not (r["network"] == network and r["mask"] == mask)]
+        return len(self.routes) < orig_len
 
     def get_all_routes(self):
         all_routes = []
@@ -162,6 +178,14 @@ class Firewall(BaseDevice):
                 if prefix_len > best_prefix_len:
                     best_prefix_len = prefix_len
                     best_match = r
+        if best_match and not best_match.get("interface") and best_match.get("next_hop"):
+            nh = best_match["next_hop"]
+            for p in self.ports.values():
+                if p.is_link_up and p.ip_address and p.subnet_mask:
+                    if is_ip_in_subnet(nh, p.ip_address, p.subnet_mask):
+                        best_match = dict(best_match)
+                        best_match["interface"] = p.name
+                        break
         return best_match
 
     def add_access_list(self, acl_name, action, protocol, src, dst):
@@ -182,12 +206,16 @@ class Firewall(BaseDevice):
         zone = self.nameif.get(clean_target, clean_target)
         if zone not in self.access_groups:
             self.access_groups[zone] = {}
-        self.access_groups[zone][direction.lower()] = acl_name.strip().upper()
+        if acl_name is None:
+            self.access_groups[zone].pop(direction.lower(), None)
+        else:
+            self.access_groups[zone][direction.lower()] = acl_name.strip().upper()
 
-    def inspect_packet(self, in_port, target_ip, src_ip, protocol="icmp"):
+    def inspect_packet(self, in_port, target_ip, src_ip, protocol="icmp", is_reply=False):
         """
         Stateful packet inspection engine:
-        - Allows established return traffic.
+        - Allows established return traffic (is_reply=True).
+        - Ingress ACL (if applied) is evaluated first.
         - Higher security level -> Lower security level: PERMIT statefully.
         - Lower security level -> Higher security level: DENY unless explicitly permitted by ACL.
         Returns (is_permitted: bool, reason_str: str)
@@ -217,21 +245,16 @@ class Firewall(BaseDevice):
         out_zone = self.get_zone_for_port(egress_port.name) if egress_port else "outside"
         out_sec = self.security_levels.get(out_zone, 0)
 
-        # 3. Outbound Traffic: Higher to Lower Security Level (e.g. inside (100) -> outside (0))
-        if in_sec > out_sec:
-            # Stateful permit
-            self.connections.append({
-                "protocol": protocol,
-                "src_ip": src_ip,
-                "dst_ip": target_ip,
-                "in_zone": in_zone,
-                "out_zone": out_zone,
-                "created": now
-            })
-            return True, f"Permitted: higher security level ({in_zone}:{in_sec}) -> lower ({out_zone}:{out_sec})"
+        # 3. Check Established Session for Return Traffic (Replies)
+        if is_reply:
+            for conn in self.connections:
+                if (conn["protocol"] in ("ip", protocol) and
+                    conn["src_ip"] == target_ip and
+                    conn["dst_ip"] == src_ip):
+                    conn["last_used"] = now
+                    return True, f"Permitted: established session ({in_zone} -> {out_zone})"
 
-        # 5. Inbound / Peer Traffic: Lower to Higher or Equal Security Level
-        # Must pass Access-List inspection on ingress interface/zone
+        # 4. Check Access-List on ingress interface/zone (if configured)
         acl_name = None
         if in_zone in self.access_groups and "in" in self.access_groups[in_zone]:
             acl_name = self.access_groups[in_zone]["in"]
@@ -241,11 +264,8 @@ class Firewall(BaseDevice):
         if acl_name and acl_name in self.access_lists:
             rules = self.access_lists[acl_name]
             for rule in rules:
-                # Check protocol match
                 proto_ok = (rule["protocol"] in ("ip", protocol))
-                # Check src match
                 src_ok = (rule["src"] == "any" or rule["src"] == src_ip)
-                # Check dst match
                 dst_ok = (rule["dst"] == "any" or rule["dst"] == target_ip)
 
                 if proto_ok and src_ok and dst_ok:
@@ -260,7 +280,20 @@ class Firewall(BaseDevice):
                         })
                         return True, f"Permitted by access-list {acl_name}"
                     else:
-                        return False, f"Denied by access-list {acl_name} explicit deny rule"
+                        return False, f"%ASA-4-106023: Denied by access-list {acl_name} explicit deny rule"
+            return False, f"%ASA-4-106023: Deny by access-list {acl_name} implicit deny"
+
+        # 5. Outbound Traffic: Higher to Lower Security Level (e.g. inside (100) -> outside (0))
+        if in_sec > out_sec:
+            self.connections.append({
+                "protocol": protocol,
+                "src_ip": src_ip,
+                "dst_ip": target_ip,
+                "in_zone": in_zone,
+                "out_zone": out_zone,
+                "created": now
+            })
+            return True, f"Permitted: higher security level ({in_zone}:{in_sec}) -> lower ({out_zone}:{out_sec})"
 
         # Default Implicit Deny for inbound traffic
         return False, f"%ASA-4-106023: Deny {protocol} src {in_zone}:{src_ip} dst {out_zone}:{target_ip} by default security policy"

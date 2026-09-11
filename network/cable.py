@@ -32,6 +32,12 @@ class Cable:
         # Bind both ports
         self.port_a.connect_cable(self)
         self.port_b.connect_cable(self)
+        if hasattr(self.port_a.device, "_stp_dirty"):
+            self.port_a.device._stp_dirty = True
+        if hasattr(self.port_b.device, "_stp_dirty"):
+            self.port_b.device._stp_dirty = True
+        self._cached_points = None
+        self._last_endpoints = None
 
     def get_peer_port(self, from_port):
         if from_port == self.port_a:
@@ -41,21 +47,31 @@ class Cable:
         return None
 
     def disconnect(self):
+        self._cached_points = None
+        self._last_endpoints = None
         if self.port_a:
+            if hasattr(self.port_a.device, "_stp_dirty"):
+                self.port_a.device._stp_dirty = True
             self.port_a.cable = None
         if self.port_b:
+            if hasattr(self.port_b.device, "_stp_dirty"):
+                self.port_b.device._stp_dirty = True
             self.port_b.cable = None
         self.port_a = None
         self.port_b = None
 
     def compute_curve_points(self, num_segments=16):
-        """Generates 3D points forming a realistic slack/sagging cable curve."""
+        """Generates 3D points forming a realistic slack/sagging cable curve (cached until endpoints move)."""
         if not self.port_a or not self.port_b:
             return []
         p1 = self.port_a.get_world_pos()
         p2 = self.port_b.get_world_pos()
         if not p1 or not p2:
             return []
+
+        curr_endpoints = (p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], num_segments)
+        if self._cached_points is not None and self._last_endpoints == curr_endpoints:
+            return self._cached_points
 
         dx = p2[0] - p1[0]
         dy = p2[1] - p1[1]
@@ -77,4 +93,7 @@ class Cable:
             py = p1[1] + dy * t + sag_offset
             pz = p1[2] + dz * t + forward_curve
             points.append((px, py, pz))
+
+        self._cached_points = points
+        self._last_endpoints = curr_endpoints
         return points

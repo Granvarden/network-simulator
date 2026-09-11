@@ -7,7 +7,25 @@ and mission checklist with animated progress bars.
 
 import math
 import time
+import functools
 import pygame
+
+@functools.lru_cache(maxsize=256)
+def _cached_wrap_text(text, font, max_w):
+    words = text.split()
+    if not words:
+        return ()
+    lines = []
+    cur_line = words[0]
+    for w in words[1:]:
+        test_line = f"{cur_line} {w}"
+        if font.size(test_line)[0] <= max_w:
+            cur_line = test_line
+        else:
+            lines.append(cur_line)
+            cur_line = w
+    lines.append(cur_line)
+    return tuple(lines)
 
 class HUD:
     def __init__(self):
@@ -259,20 +277,7 @@ class HUD:
                 break
 
     def _wrap_text(self, text, font, max_w):
-        words = text.split()
-        if not words:
-            return []
-        lines = []
-        cur_line = words[0]
-        for w in words[1:]:
-            test_line = f"{cur_line} {w}"
-            if font.size(test_line)[0] <= max_w:
-                cur_line = test_line
-            else:
-                lines.append(cur_line)
-                cur_line = w
-        lines.append(cur_line)
-        return lines
+        return list(_cached_wrap_text(text, font, max_w))
 
     def _draw_objective_card(self, surface, x, y, w, mode_title, current_obj, checklist, hint_text):
         """Draws Mission Objective card with dynamic checklist progress bar."""

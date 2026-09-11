@@ -8,6 +8,20 @@ import socket
 import struct
 from .device import BaseDevice, Port
 
+def is_valid_ipv4(ip_str):
+    if not isinstance(ip_str, str):
+        return False
+    parts = ip_str.strip().split(".")
+    if len(parts) != 4:
+        return False
+    for p in parts:
+        if not p.isdigit():
+            return False
+        num = int(p)
+        if num < 0 or num > 255:
+            return False
+    return True
+
 def ip_to_int(ip_str):
     try:
         return struct.unpack("!I", socket.inet_aton(ip_str))[0]
@@ -73,6 +87,7 @@ class Router(BaseDevice):
         self.nat_rules = []                  # list of dicts: [{"type": "overload", "acl": 1, "interface": "g0/0"}]
         self.nat_translations = []           # active mappings: [{"protocol": "icmp", "inside_global": ..., ...}]
         self.access_lists = {}               # acl_id -> list of rule dicts
+        self.access_groups = {}              # interface_name (lowercase) -> {"in": acl_id, "out": acl_id}
 
     def get_port_local_pos(self, port_name, port_index=0):
         """Returns exact local coordinates (x, y, z) on Router front face."""
@@ -113,9 +128,16 @@ class Router(BaseDevice):
         return sub
 
     def add_static_route(self, network, mask, next_hop_or_int):
+        network = network.strip()
+        mask = mask.strip()
+        next_hop_or_int = next_hop_or_int.strip()
+
+        if not is_valid_ipv4(network) or not is_valid_ipv4(mask):
+            return False
+
         # Remove duplicate if exists
         self.routes = [r for r in self.routes if not (r["network"] == network and r["mask"] == mask)]
-        is_ip = "." in next_hop_or_int and not next_hop_or_int.lower().startswith("g")
+        is_ip = is_valid_ipv4(next_hop_or_int)
         route = {
             "network": network,
             "mask": mask,
@@ -124,9 +146,24 @@ class Router(BaseDevice):
             "type": "S"
         }
         self.routes.append(route)
+        return True
+
+    def remove_static_route(self, network, mask, next_hop_or_int=None):
+        network = network.strip()
+        mask = mask.strip()
+        orig_len = len(self.routes)
+        if next_hop_or_int:
+            clean_hop = next_hop_or_int.strip()
+            self.routes = [r for r in self.routes if not (
+                r["network"] == network and r["mask"] == mask and
+                (r.get("next_hop") == clean_hop or r.get("interface") == clean_hop)
+            )]
+        else:
+            self.routes = [r for r in self.routes if not (r["network"] == network and r["mask"] == mask)]
+        return len(self.routes) < orig_len
 
     def get_all_routes(self):
-        """Returns directly connected routes + configured static routes."""
+        """Returns directly connected routes + active static routes."""
         all_routes = []
 
         # 1. Directly Connected routes from physical interfaces
@@ -155,12 +192,21 @@ class Router(BaseDevice):
                     "type": "C"
                 })
 
-        # 3. Static routes
-        all_routes.extend(self.routes)
+        # 3. Static routes - check interface link up if interface is specified
+        for r in self.routes:
+            if r.get("interface"):
+                iface = self.get_interface(r["interface"])
+                if iface and iface.is_link_up:
+                    all_routes.append(r)
+            else:
+                all_routes.append(r)
+
         return all_routes
 
     def lookup_route(self, dest_ip):
         """Longest prefix match routing lookup."""
+        if not is_valid_ipv4(dest_ip):
+            return None
         best_match = None
         best_prefix_len = -1
 
@@ -187,11 +233,25 @@ class Router(BaseDevice):
         }
         self.access_lists[acl_key].append(rule)
 
-    def matches_acl(self, acl_id, ip_address):
-        """Tests if ip_address matches any permit rule in acl_id."""
+    def set_access_group(self, acl_id, direction, interface_name):
+        """Applies ACL to interface in ingress ('in') or egress ('out') direction."""
+        clean_if = interface_name.strip().lower()
+        if clean_if not in self.access_groups:
+            self.access_groups[clean_if] = {}
+        if acl_id is None:
+            self.access_groups[clean_if].pop(direction.strip().lower(), None)
+        else:
+            self.access_groups[clean_if][direction.strip().lower()] = str(acl_id)
+
+    def check_acl(self, acl_id, ip_address):
+        """
+        Tests ip_address against acl_id.
+        Returns (permitted: bool, reason_str: str)
+        First-match rule ordering with implicit deny.
+        """
         acl_key = str(acl_id)
         rules = self.access_lists.get(acl_key, [])
-        for rule in rules:
+        for idx, rule in enumerate(rules):
             src = rule["source"]
             wc = rule["wildcard"]
             matched = False
@@ -201,9 +261,17 @@ class Router(BaseDevice):
                 matched = True
 
             if matched:
-                return rule["action"] == "permit"
-        # Implicit deny at end of ACL
-        return False
+                action = rule["action"]
+                if action == "permit":
+                    return True, f"Permitted by access-list {acl_key} line {idx+1} ({action} {src} {wc})"
+                else:
+                    return False, f"Denied by access-list {acl_key} line {idx+1} ({action} {src} {wc})"
+        return False, f"Denied by access-list {acl_key} implicit deny"
+
+    def matches_acl(self, acl_id, ip_address):
+        """Tests if ip_address matches any permit rule in acl_id (backward compatibility)."""
+        permitted, _ = self.check_acl(acl_id, ip_address)
+        return permitted
 
     def add_nat_rule(self, rule_type, acl_id, out_interface):
         rule = {
@@ -257,6 +325,26 @@ class Router(BaseDevice):
                         self.nat_translations.append(existing)
 
                     return out_ip, existing
+        return None, None
+
+    def perform_reverse_nat(self, dst_ip, in_port_name, protocol="icmp"):
+        """
+        Translates public inside global destination IP back to private inside local IP
+        for return traffic arriving on an outside interface.
+        """
+        clean_in = in_port_name.strip().lower()
+        if clean_in not in self.nat_outside_interfaces:
+            return None, None
+
+        now = time.time()
+        for tr in self.nat_translations:
+            if tr.get("protocol") in ("ip", protocol):
+                ig_ip = tr["inside_global"].split(":")[0]
+                if ig_ip == dst_ip:
+                    tr["last_used"] = now
+                    il_ip = tr["inside_local"].split(":")[0]
+                    return il_ip, tr
+
         return None, None
 
     def clear_nat_translations(self):

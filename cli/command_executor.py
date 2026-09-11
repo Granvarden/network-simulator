@@ -209,6 +209,18 @@ class CommandExecutor:
             except ValueError:
                 return "% Invalid VLAN ID."
 
+        # spanning-tree [vlan <id>] priority <prio>
+        if (v.startswith("spanning-tree") or v == "spanning") and isinstance(self.device, Switch):
+            for idx, tok in enumerate(tokens):
+                if tok.lower() == "priority" and idx + 1 < len(tokens):
+                    try:
+                        self.device.stp_priority = int(tokens[idx + 1])
+                        self.device.recalculate_stp()
+                        return ""
+                    except ValueError:
+                        return "% Invalid priority value."
+            return ""
+
         # access-list configuration (Router standard ACL & Firewall extended ACL)
         if v in ("access-list", "acl") and len(tokens) > 2:
             if isinstance(self.device, Router):
@@ -251,7 +263,14 @@ class CommandExecutor:
             self.device.add_static_route(net, mask, gw, interface=zone)
             return ""
 
-        # ip route <net> <mask> <gw>
+        # no ip route <net> <mask4> [gw]
+        if v == "no" and len(tokens) >= 5 and tokens[1].lower() == "ip" and tokens[2].lower() == "route" and isinstance(self.device, (Router, Firewall)):
+            net, mask = tokens[3], tokens[4]
+            gw = tokens[5] if len(tokens) > 5 else None
+            self.device.remove_static_route(net, mask, gw)
+            return ""
+
+        # ip route <net> <mask4> <gw>
         if v == "ip" and len(tokens) >= 5 and tokens[1].lower() == "route" and isinstance(self.device, (Router, Firewall)):
             net, mask, nexthop = tokens[2], tokens[3], tokens[4]
             self.device.add_static_route(net, mask, nexthop)
@@ -298,6 +317,13 @@ class CommandExecutor:
             ip, mask = tokens[2], tokens[3]
             self.current_interface.ip_address = ip
             self.current_interface.subnet_mask = mask
+            return ""
+
+        # ip access-group <acl> in|out (Router)
+        if tokens[0].lower() == "ip" and len(tokens) >= 4 and tokens[1].lower() in ("access-group", "access-list") and isinstance(self.device, Router):
+            acl_id = tokens[2]
+            direction = tokens[3].lower()
+            self.device.set_access_group(acl_id, direction, self.current_interface.name)
             return ""
 
         # ip nat inside / outside (Router)
@@ -505,6 +531,10 @@ class CommandExecutor:
         if sub in ("mac address-table", "mac-address-table", "mac") and isinstance(self.device, Switch):
             return self._show_mac_table()
 
+        # show spanning-tree
+        if (sub.startswith("spanning-tree") or sub in ("spanning", "span", "stp")) and isinstance(self.device, Switch):
+            return self._show_spanning_tree(args)
+
         # show ip route / show route
         if (sub in ("ip route", "ip ro", "route") or sub.startswith("ip route")) and isinstance(self.device, (Router, Firewall)):
             return self._show_ip_route()
@@ -585,6 +615,55 @@ class CommandExecutor:
         else:
             for mac, info in self.device.mac_table.items():
                 lines.append(f"{info['vlan']:<8}{mac:<20}{'DYNAMIC':<10}{info['port']}")
+        return "\n".join(lines)
+
+    def _show_spanning_tree(self, args=None):
+        if not isinstance(self.device, Switch):
+            return "% Spanning-tree command only supported on switches."
+
+        if self.device.stp_enabled:
+            self.device.recalculate_stp()
+
+        root_prio, root_mac = self.device.root_bridge_id if self.device.root_bridge_id else self.device.bridge_id
+        br_prio, br_mac = self.device.bridge_id
+
+        cisco_root_mac = format_cisco_mac(root_mac)
+        cisco_br_mac = format_cisco_mac(br_mac)
+
+        is_root = self.device.is_root_bridge
+        root_cost = self.device.root_path_cost
+        rp_name = self.device.root_port.name if self.device.root_port else "None"
+
+        lines = [
+            "VLAN0001",
+            "  Spanning tree enabled protocol ieee",
+            f"  Root ID    Priority    {root_prio}",
+            f"             Address     {cisco_root_mac}",
+        ]
+        if is_root:
+            lines.append("             This bridge is the root")
+        else:
+            lines.append(f"             Cost        {root_cost}")
+            lines.append(f"             Port        {rp_name}")
+
+        lines.extend([
+            f"  Bridge ID  Priority    {br_prio}",
+            f"             Address     {cisco_br_mac}",
+            "             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec",
+            "",
+            f"{'Interface':<12}{'Role':<14}{'State':<14}{'Cost':<8}{'Type'}",
+            "-" * 60
+        ])
+
+        for p_name, p in sorted(self.device.ports.items(), key=lambda x: x[1].port_index):
+            if p.port_type == "CONSOLE":
+                continue
+            role = getattr(p, "stp_role", "Designated")
+            state = getattr(p, "stp_state", "Forwarding")
+            cost = getattr(p, "stp_cost", 4)
+            p_type = "P2p" if p.cable else "Edge"
+            lines.append(f"{p.name:<12}{role:<14}{state:<14}{cost:<8}{p_type}")
+
         return "\n".join(lines)
 
     def _show_ip_route(self):

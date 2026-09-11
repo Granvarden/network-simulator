@@ -294,7 +294,8 @@ class GameManager:
             self.mode.update(dt, self.camera)
 
     def _render(self):
-        # 1. 3D Scene (if in-game, paused, topology map, or device manager)
+        # Raycast once per frame if in active gameplay/inspect mode
+        f_dev, f_port = None, None
         if self.mode and self.menu.state in (MenuState.IN_GAME, MenuState.PAUSE, MenuState.TOPOLOGY_MAP, MenuState.DEVICE_MANAGER):
             f_dev, f_port, _ = self.camera.raycast(self.mode.devices)
             self.renderer3d.render_scene(self.camera, self.mode.devices, self.mode.cables, f_dev, f_port)
@@ -307,7 +308,6 @@ class GameManager:
         w, h = self.window.width, self.window.height
 
         if self.menu.state == MenuState.IN_GAME:
-            f_dev, f_port, _ = self.camera.raycast(self.mode.devices)
             # Get concept panel data (Tutorial mode only)
             concept_data = None
             if hasattr(self.mode, "get_concept"):

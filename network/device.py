@@ -35,6 +35,11 @@ class Port:
         self.subnet_mask = None
         self.mac_address = f"02:00:{hash(device.id)%255:02x}:{port_index:02x}:00:01"
 
+        # STP (Spanning Tree Protocol)
+        self.stp_state = "Forwarding"   # Forwarding, Blocking, Listening, Learning, Disabled
+        self.stp_role = "Designated"    # Root, Designated, Alternate, Disabled
+        self.stp_cost = 4               # Default 802.1D path cost for 1000 Mbps (Gigabit)
+
         # LED State
         self.last_traffic_time = 0.0
 
