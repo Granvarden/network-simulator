@@ -8,9 +8,10 @@ TTL decrements, and step-by-step real-time execution.
 import time
 import random
 from .router import is_ip_in_subnet, ip_to_int, Router
-from .switch import Switch
+from .switch import Switch, SVI
 from .host import Host
 from .firewall import Firewall
+from .dhcp import DHCPMessage, DHCPMessageType, DHCPClientState
 from engine.audio import SoundManager
 
 PUBLIC_INTERNET_IPS = {"8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", "208.67.222.222", "9.9.9.9"}
@@ -58,6 +59,10 @@ class PingResult:
         self.error_message = None
 
     @property
+    def success(self):
+        return self.packets_received > 0
+
+    @property
     def loss_percent(self):
         if self.packets_sent == 0:
             return 100
@@ -75,6 +80,18 @@ class PingResult:
             else:
                 result.append("." if not self.error_message else "U")
         return "".join(result)
+
+    @property
+    def avg_rtt(self):
+        return round(sum(self.rtt_ms) / len(self.rtt_ms), 2) if self.rtt_ms else 0.0
+
+    @property
+    def min_rtt(self):
+        return min(self.rtt_ms) if self.rtt_ms else 0.0
+
+    @property
+    def max_rtt(self):
+        return max(self.rtt_ms) if self.rtt_ms else 0.0
 
     @property
     def mdev(self):
@@ -110,6 +127,10 @@ class PacketEngine:
         if hasattr(dev, "subinterfaces"):
             for sub in dev.subinterfaces.values():
                 if sub.ip_address == target_ip and not sub.is_shutdown:
+                    return True
+        if hasattr(dev, "svis"):
+            for svi in dev.svis.values():
+                if svi.ip_address == target_ip and not svi.is_shutdown:
                     return True
         return False
 
@@ -215,6 +236,14 @@ class PacketEngine:
                     step["error_message"] = "From " + source_device.hostname + ": Destination Host Unreachable"
                     step["drop_reason"] = "No default gateway configured on host"
                     return step
+            elif isinstance(source_device, Switch):
+                if getattr(source_device, "default_gateway", None):
+                    next_hop_ip = source_device.default_gateway
+                else:
+                    step["status_code"] = "U"
+                    step["error_message"] = "% Destination network unreachable"
+                    step["drop_reason"] = "No default gateway configured on switch"
+                    return step
 
         # 3. ARP Simulation on Source
         arp_entry = source_device.lookup_arp(next_hop_ip)
@@ -242,6 +271,11 @@ class PacketEngine:
                 arp_entry = source_device.lookup_arp(next_hop_ip)
 
         src_mac = getattr(src_port, "mac_address", "02:00:1a:00:00:01")
+        if isinstance(source_device, Switch):
+            for s in getattr(source_device, "svis", {}).values():
+                if s.ip_address == src_ip:
+                    src_mac = s.mac_address
+                    break
         dst_mac = arp_entry["mac"] if arp_entry else "FF:FF:FF:FF:FF:FF"
 
         # 4. Trace Echo Request forward path
@@ -295,6 +329,24 @@ class PacketEngine:
                     step["error_message"] = step["drop_reason"]
                     return step
                 reply_if, _, _ = self._find_source_ip_context(dest_dev, dest_reply_to_ip)
+            elif isinstance(dest_dev, Switch):
+                reply_svi = None
+                for s in dest_dev.svis.values():
+                    if s.ip_address == dest_target_ip and s.is_link_up:
+                        reply_svi = s
+                        break
+                if not reply_svi:
+                    step["status_code"] = "U"
+                    step["drop_reason"] = f"Destination {dest_dev.hostname} SVI is down or unconfigured"
+                    step["error_message"] = step["drop_reason"]
+                    return step
+                if not is_ip_in_subnet(dest_reply_to_ip, reply_svi.ip_address, reply_svi.subnet_mask):
+                    if not dest_dev.default_gateway:
+                        step["status_code"] = "U"
+                        step["drop_reason"] = f"Destination {dest_dev.hostname} has no default gateway to reach {dest_reply_to_ip}"
+                        step["error_message"] = step["drop_reason"]
+                        return step
+                reply_if = req_context.get("destination_port")
             else:
                 reply_if = req_context.get("destination_port")
 
@@ -310,15 +362,19 @@ class PacketEngine:
             rep_next_hop = dest_reply_to_ip
             if isinstance(dest_dev, Host) and not is_ip_in_subnet(dest_reply_to_ip, dest_dev.eth0.ip_address, dest_dev.eth0.subnet_mask):
                 rep_next_hop = dest_dev.default_gateway
+            elif isinstance(dest_dev, Switch) and not is_ip_in_subnet(dest_reply_to_ip, reply_svi.ip_address, reply_svi.subnet_mask):
+                rep_next_hop = dest_dev.default_gateway
 
             rep_arp = dest_dev.lookup_arp(rep_next_hop) if dest_dev else None
             if not rep_arp and dest_dev and reply_port:
-                reachable, peer_mac = self._probe_arp_resolution(dest_dev, reply_port, rep_next_hop)
+                reachable, peer_mac = self._probe_arp_resolution(dest_dev, reply_port, rep_next_hop, vlan_id=reply_vlan)
                 if reachable:
                     dest_dev.add_arp_entry(rep_next_hop, peer_mac, reply_port.name)
                     rep_arp = dest_dev.lookup_arp(rep_next_hop)
 
             rep_src_mac = getattr(reply_port, "mac_address", "02:00:1a:00:00:01") if reply_port else None
+            if isinstance(dest_dev, Switch) and reply_svi:
+                rep_src_mac = reply_svi.mac_address
             rep_dst_mac = rep_arp["mac"] if rep_arp else "FF:FF:FF:FF:FF:FF"
 
             reply_ok = self._trace_packet(dest_dev, reply_port, dest_target_ip,
@@ -396,6 +452,12 @@ class PacketEngine:
             if peer_port.mode == "access":
                 in_vlan = peer_port.access_vlan
 
+            # Check if peer switch itself owns target_ip on SVI for in_vlan
+            if hasattr(peer_dev, "svis"):
+                svi = peer_dev.svis.get(in_vlan)
+                if svi and svi.ip_address == target_ip and svi.is_link_up:
+                    return True, svi.mac_address
+
             for p in peer_dev.ports.values():
                 if p != peer_port and p.cable and not p.is_shutdown:
                     # Skip STP Blocking ports
@@ -426,6 +488,10 @@ class PacketEngine:
                                     if sub.vlan_id is None or sub.vlan_id == in_vlan:
                                         parent = getattr(sub, "parent_port", sub)
                                         return True, getattr(parent, "mac_address", "02:00:1a:00:00:01")
+                        if hasattr(r_dev, "svis"):
+                            r_svi = r_dev.svis.get(in_vlan)
+                            if r_svi and r_svi.ip_address == target_ip and r_svi.is_link_up:
+                                return True, r_svi.mac_address
 
         return False, None
 
@@ -471,6 +537,45 @@ class PacketEngine:
                     if sub and sub.is_link_up and sub.ip_address:
                         return sub, sub.ip_address, sub.subnet_mask
 
+        # For Switches: select active SVI based on destination subnet or default gateway
+        if isinstance(dev, Switch):
+            svi = None
+            if preferred_interface:
+                clean = preferred_interface.strip().lower()
+                if clean.startswith("vlan"):
+                    vid_str = clean[4:].strip()
+                    if vid_str.isdigit():
+                        svi = dev.get_svi(int(vid_str))
+                if not svi and hasattr(dev, "get_interface"):
+                    cand = dev.get_interface(preferred_interface)
+                    if isinstance(cand, SVI):
+                        svi = cand
+
+            if not svi and target_ip:
+                for s in dev.svis.values():
+                    if s.is_link_up and s.ip_address and s.subnet_mask:
+                        if is_ip_in_subnet(target_ip, s.ip_address, s.subnet_mask):
+                            svi = s
+                            break
+                if not svi and getattr(dev, "default_gateway", None):
+                    for s in dev.svis.values():
+                        if s.is_link_up and s.ip_address and s.subnet_mask:
+                            if is_ip_in_subnet(dev.default_gateway, s.ip_address, s.subnet_mask):
+                                svi = s
+                                break
+
+            if not svi:
+                for s in dev.svis.values():
+                    if s.is_link_up and s.ip_address and s.subnet_mask:
+                        svi = s
+                        break
+
+            if svi and svi.is_link_up and svi.ip_address:
+                phys = dev.get_first_active_port_for_vlan(svi.vlan_id)
+                if phys:
+                    return phys, svi.ip_address, svi.subnet_mask
+                return svi, svi.ip_address, svi.subnet_mask
+
         # Fallback: find first active port with IP
         if hasattr(dev, "ports"):
             for p in dev.ports.values():
@@ -480,6 +585,11 @@ class PacketEngine:
             for sub in dev.subinterfaces.values():
                 if sub.is_link_up and sub.ip_address:
                     return sub, sub.ip_address, sub.subnet_mask
+        if hasattr(dev, "svis"):
+            for s in dev.svis.values():
+                if s.is_link_up and s.ip_address:
+                    phys = dev.get_first_active_port_for_vlan(s.vlan_id) if hasattr(dev, "get_first_active_port_for_vlan") else None
+                    return phys or s, s.ip_address, s.subnet_mask
 
         return None, None, None
 
@@ -729,6 +839,15 @@ class PacketEngine:
         if isinstance(dev, Host):
             p = dev.eth0
             return p and p.ip_address == target_ip
+        elif isinstance(dev, Switch):
+            effective_vlan = vlan_id
+            if in_port and getattr(in_port, "mode", None) == "access":
+                effective_vlan = in_port.access_vlan
+            if hasattr(dev, "svis"):
+                svi = dev.svis.get(effective_vlan)
+                if svi and svi.ip_address == target_ip and svi.is_link_up:
+                    return True
+            return False
         elif isinstance(dev, Router):
             for p in dev.ports.values():
                 if p.ip_address == target_ip:
@@ -798,3 +917,241 @@ class PacketEngine:
             })
 
         return hops
+
+    def _collect_broadcast_endpoints(self, source_dev, out_port, vlan_id=None):
+        """
+        Discovers all reachable Layer 3 candidate endpoints (Router interfaces, SVIs, Hosts)
+        within the broadcast domain, respecting physical links, access/trunk VLAN memberships,
+        and Spanning Tree Protocol (STP) blocking states.
+        """
+        phys_port = getattr(out_port, "parent_port", out_port)
+        if not phys_port or not phys_port.is_link_up or not phys_port.cable:
+            return []
+
+        peer_port = phys_port.cable.get_peer_port(phys_port)
+        if not peer_port or peer_port.is_shutdown:
+            return []
+
+        in_vlan = vlan_id
+        if in_vlan is None:
+            in_vlan = getattr(out_port, "vlan_id", None) or getattr(out_port, "access_vlan", 1)
+
+        endpoints = []
+        peer_dev = peer_port.device
+
+        # Direct connection to Router
+        if isinstance(peer_dev, Router):
+            matched = False
+            if hasattr(peer_dev, "subinterfaces"):
+                for sub in peer_dev.subinterfaces.values():
+                    if sub.vlan_id == in_vlan or sub.vlan_id is None:
+                        endpoints.append((peer_dev, sub, in_vlan))
+                        matched = True
+            if not matched or peer_port.ip_address:
+                endpoints.append((peer_dev, peer_port, in_vlan))
+            return endpoints
+
+        # Direct connection to Host
+        if isinstance(peer_dev, Host):
+            endpoints.append((peer_dev, peer_port, in_vlan))
+            return endpoints
+
+        # Connection through Switch
+        if isinstance(peer_dev, Switch):
+            if peer_dev.stp_enabled:
+                if getattr(peer_dev, "_stp_dirty", True) or peer_dev.root_bridge_id is None:
+                    peer_dev.recalculate_stp()
+                if getattr(peer_port, "stp_state", "Forwarding") == "Blocking":
+                    return []
+
+            if peer_port.mode == "access":
+                in_vlan = peer_port.access_vlan
+
+            # Check if switch itself has SVI for in_vlan
+            if hasattr(peer_dev, "svis") and in_vlan in peer_dev.svis:
+                svi = peer_dev.svis[in_vlan]
+                if svi.is_link_up:
+                    endpoints.append((peer_dev, svi, in_vlan))
+
+            # Traverse Layer 2 switch topology with loop prevention
+            visited_switches = {peer_dev}
+            queue = [(peer_dev, peer_port, in_vlan)]
+
+            while queue:
+                curr_sw, from_port, curr_vlan = queue.pop(0)
+                for p in curr_sw.ports.values():
+                    if p == from_port or p.is_shutdown or not p.cable:
+                        continue
+                    if curr_sw.stp_enabled and getattr(p, "stp_state", "Forwarding") == "Blocking":
+                        continue
+                    if p.mode == "access" and p.access_vlan != curr_vlan:
+                        continue
+                    if p.mode == "trunk" and p.trunk_allowed_vlans and curr_vlan not in p.trunk_allowed_vlans:
+                        continue
+
+                    r_port = p.cable.get_peer_port(p)
+                    if not r_port or r_port.is_shutdown:
+                        continue
+                    r_dev = r_port.device
+
+                    if isinstance(r_dev, Switch):
+                        if r_dev.stp_enabled and getattr(r_port, "stp_state", "Forwarding") == "Blocking":
+                            continue
+                        if r_dev not in visited_switches:
+                            visited_switches.add(r_dev)
+                            if hasattr(r_dev, "svis") and curr_vlan in r_dev.svis:
+                                r_svi = r_dev.svis[curr_vlan]
+                                if r_svi.is_link_up:
+                                    endpoints.append((r_dev, r_svi, curr_vlan))
+                            queue.append((r_dev, r_port, curr_vlan))
+
+                    elif isinstance(r_dev, Router):
+                        matched = False
+                        if hasattr(r_dev, "subinterfaces"):
+                            for sub in r_dev.subinterfaces.values():
+                                if sub.vlan_id == curr_vlan:
+                                    endpoints.append((r_dev, sub, curr_vlan))
+                                    matched = True
+                        if not matched or r_port.ip_address:
+                            endpoints.append((r_dev, r_port, curr_vlan))
+
+                    elif isinstance(r_dev, Host):
+                        endpoints.append((r_dev, r_port, curr_vlan))
+
+        return endpoints
+
+    def simulate_dhcp_dora(self, client_dev, client_port):
+        """
+        Executes complete DHCP DORA handshake from client_port across the network topology.
+        Returns (success: bool, result_msg_or_error: DHCPMessage or str).
+        """
+        if not client_port or not client_port.is_link_up or not client_port.cable:
+            return False, "Interface is down or disconnected"
+
+        vlan_id = getattr(client_port, "vlan_id", None) or getattr(client_port, "access_vlan", 1)
+        endpoints = self._collect_broadcast_endpoints(client_dev, client_port, vlan_id=vlan_id)
+
+        # Look for reachable DHCP Server with matching pool
+        server_match = None
+        server_iface = None
+        server_vlan = vlan_id
+
+        for dev, iface, ep_vlan in endpoints:
+            if hasattr(dev, "dhcp_server") and dev.dhcp_server and dev.dhcp_server.pools:
+                pool = dev.dhcp_server.find_pool_for_context(in_vlan=ep_vlan, in_ip=getattr(iface, "ip_address", None))
+                if pool:
+                    server_match = dev.dhcp_server
+                    server_iface = iface
+                    server_vlan = ep_vlan
+                    break
+
+        if not server_match:
+            return False, "DHCPDISCOVER timeout: No DHCP server found in broadcast domain"
+
+        # 1. DHCPDISCOVER
+        client_port.trigger_traffic()
+        server_ip = getattr(server_iface, "ip_address", None)
+        xid = getattr(getattr(client_dev, "dhcp_client", None), "current_xid", 1001)
+        if hasattr(client_dev, "dhcp_client") and client_dev.dhcp_client:
+            client_dev.dhcp_client.current_xid += 1
+            client_dev.dhcp_client.state = DHCPClientState.SELECTING
+
+        discover_msg = DHCPMessage(
+            msg_type=DHCPMessageType.DISCOVER,
+            xid=xid,
+            client_mac=getattr(client_port, "mac_address", "02:00:1a:00:00:01"),
+            hostname=client_dev.hostname,
+            vlan_id=server_vlan
+        )
+
+        offer_msg = server_match.handle_discover(
+            discover_msg,
+            in_vlan=server_vlan,
+            in_ip=server_ip,
+            server_ip=server_ip
+        )
+
+        if not offer_msg:
+            return False, "DHCPOFFER failed: DHCP pool exhausted or unavailable"
+
+        # 2. DHCPREQUEST
+        if hasattr(client_dev, "dhcp_client") and client_dev.dhcp_client:
+            client_dev.dhcp_client.state = DHCPClientState.REQUESTING
+
+        request_msg = DHCPMessage(
+            msg_type=DHCPMessageType.REQUEST,
+            xid=offer_msg.xid,
+            client_mac=client_port.mac_address,
+            yiaddr=offer_msg.yiaddr,
+            server_id=offer_msg.server_id,
+            hostname=client_dev.hostname,
+            vlan_id=server_vlan
+        )
+
+        ack_msg = server_match.handle_request(
+            request_msg,
+            in_vlan=server_vlan,
+            in_ip=server_ip,
+            server_ip=server_ip
+        )
+
+        if not ack_msg or ack_msg.msg_type == DHCPMessageType.NAK:
+            if hasattr(client_dev, "dhcp_client") and client_dev.dhcp_client:
+                client_dev.dhcp_client.state = DHCPClientState.INIT
+            return False, "DHCPNAK received: Request rejected by DHCP server"
+
+        # 3. DHCPACK: Configure client
+        client_port.ip_address = ack_msg.yiaddr
+        client_port.subnet_mask = ack_msg.subnet_mask
+        if ack_msg.router:
+            client_dev.default_gateway = ack_msg.router
+        if ack_msg.dns_server:
+            client_dev.dns_server = ack_msg.dns_server
+        client_dev.dhcp_enabled = True
+
+        if hasattr(client_dev, "dhcp_client") and client_dev.dhcp_client:
+            client_dev.dhcp_client.state = DHCPClientState.BOUND
+            client_dev.dhcp_client.lease = server_match.binding_table.get(ack_msg.yiaddr)
+            client_dev.dhcp_lease = client_dev.dhcp_client.lease
+
+        return True, ack_msg
+
+    def simulate_dhcp_release(self, client_dev, client_port):
+        """
+        Transmits DHCPRELEASE and clears client IP configuration.
+        """
+        if not client_port or not client_port.ip_address:
+            return False, "Interface has no assigned IP"
+
+        vlan_id = getattr(client_port, "vlan_id", None) or getattr(client_port, "access_vlan", 1)
+        endpoints = self._collect_broadcast_endpoints(client_dev, client_port, vlan_id=vlan_id)
+
+        current_ip = client_port.ip_address
+        current_mac = getattr(client_port, "mac_address", "")
+
+        rel_msg = DHCPMessage(
+            msg_type=DHCPMessageType.RELEASE,
+            client_mac=current_mac,
+            ciaddr=current_ip,
+            hostname=client_dev.hostname,
+            vlan_id=vlan_id
+        )
+
+        released = False
+        for dev, iface, ep_vlan in endpoints:
+            if hasattr(dev, "dhcp_server") and dev.dhcp_server:
+                if dev.dhcp_server.handle_release(rel_msg):
+                    released = True
+                    break
+
+        client_port.ip_address = None
+        client_port.subnet_mask = None
+        client_dev.default_gateway = None
+        client_dev.dhcp_enabled = False
+        if hasattr(client_dev, "dhcp_client") and client_dev.dhcp_client:
+            client_dev.dhcp_client.state = DHCPClientState.INIT
+            client_dev.dhcp_client.lease = None
+            client_dev.dhcp_lease = None
+
+        return True, "DHCP lease released"
+

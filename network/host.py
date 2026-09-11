@@ -13,6 +13,10 @@ class Host(BaseDevice):
         self.default_gateway = None
         self.dns_server = "8.8.8.8"
         self.dhcp_enabled = False
+        self.dhcp_lease = None
+
+        from .dhcp import DHCPClient
+        self.dhcp_client = DHCPClient(self)
 
         if self.device_type == "laptop":
             # Compact 15.6" Laptop Dimensions
@@ -75,3 +79,18 @@ class Host(BaseDevice):
             self.default_gateway = gateway
         if dns:
             self.dns_server = dns
+        self.dhcp_enabled = False
+
+    def request_dhcp(self, port_name="eth0"):
+        """Requests IP via DHCP DORA handshake."""
+        ok, res = self.dhcp_client.start_dhcp(port_name)
+        if ok:
+            self.dhcp_enabled = True
+        return ok, res
+
+    def release_dhcp(self, port_name="eth0"):
+        """Releases DHCP IP lease."""
+        ok, res = self.dhcp_client.release_dhcp(port_name)
+        if ok:
+            self.dhcp_enabled = False
+        return ok, res

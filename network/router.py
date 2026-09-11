@@ -22,6 +22,15 @@ def is_valid_ipv4(ip_str):
             return False
     return True
 
+def is_valid_netmask(mask_str):
+    if not is_valid_ipv4(mask_str):
+        return False
+    val = ip_to_int(mask_str)
+    if val == 0:
+        return False
+    inv = (~val) & 0xFFFFFFFF
+    return (inv & (inv + 1)) == 0
+
 def ip_to_int(ip_str):
     try:
         return struct.unpack("!I", socket.inet_aton(ip_str))[0]
@@ -88,6 +97,9 @@ class Router(BaseDevice):
         self.nat_translations = []           # active mappings: [{"protocol": "icmp", "inside_global": ..., ...}]
         self.access_lists = {}               # acl_id -> list of rule dicts
         self.access_groups = {}              # interface_name (lowercase) -> {"in": acl_id, "out": acl_id}
+
+        from .dhcp import DHCPServer
+        self.dhcp_server = DHCPServer(self)
 
     def get_port_local_pos(self, port_name, port_index=0):
         """Returns exact local coordinates (x, y, z) on Router front face."""

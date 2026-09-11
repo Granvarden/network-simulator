@@ -3,8 +3,8 @@ cli/command_executor.py - Cisco IOS Command Handlers & State Machine
 Implements Cisco IOS command behaviors, output tables, and config state changes.
 """
 
-from network.router import Router, SubInterface
-from network.switch import Switch
+from network.router import Router, SubInterface, is_valid_ipv4, is_valid_netmask
+from network.switch import Switch, SVI
 from network.host import Host
 from network.firewall import Firewall
 from network.packet_engine import PacketEngine, format_cisco_mac
@@ -16,6 +16,7 @@ class IOSMode:
     CONFIG_IF = "CONFIG_IF"         # Switch(config-if)#
     CONFIG_SUBIF = "CONFIG_SUBIF"   # Router(config-subif)#
     CONFIG_VLAN = "CONFIG_VLAN"     # Switch(config-vlan)#
+    CONFIG_DHCP_POOL = "CONFIG_DHCP_POOL" # Switch(dhcp-config)#
 
 class CommandExecutor:
     def __init__(self, device):
@@ -23,6 +24,7 @@ class CommandExecutor:
         self.mode = IOSMode.USER if isinstance(device, (Switch, Router, Firewall)) else IOSMode.PRIVILEGED
         self.current_interface = None
         self.current_vlan_id = None
+        self.current_dhcp_pool = None
         self.saved_config = ""
         self.packet_engine = PacketEngine.get_instance()
 
@@ -42,6 +44,8 @@ class CommandExecutor:
             return f"{h}(config-subif)#"
         elif self.mode == IOSMode.CONFIG_VLAN:
             return f"{h}(config-vlan)#{self.current_vlan_id}#"
+        elif self.mode == IOSMode.CONFIG_DHCP_POOL:
+            return f"{h}(dhcp-config)#"
         return f"{h}#"
 
     def execute(self, line):
@@ -65,6 +69,8 @@ class CommandExecutor:
         if verb == "end":
             self.mode = IOSMode.PRIVILEGED
             self.current_interface = None
+            self.current_vlan_id = None
+            self.current_dhcp_pool = None
             return ""
 
         if self.mode == IOSMode.USER:
@@ -77,14 +83,17 @@ class CommandExecutor:
             return self._exec_config_if(tokens)
         elif self.mode == IOSMode.CONFIG_VLAN:
             return self._exec_config_vlan(tokens)
+        elif self.mode == IOSMode.CONFIG_DHCP_POOL:
+            return self._exec_config_dhcp(tokens)
 
         return "% Invalid input detected at '^' marker."
 
     def _handle_exit(self):
-        if self.mode == IOSMode.CONFIG_IF or self.mode == IOSMode.CONFIG_SUBIF or self.mode == IOSMode.CONFIG_VLAN:
+        if self.mode in (IOSMode.CONFIG_IF, IOSMode.CONFIG_SUBIF, IOSMode.CONFIG_VLAN, IOSMode.CONFIG_DHCP_POOL):
             self.mode = IOSMode.CONFIG
             self.current_interface = None
             self.current_vlan_id = None
+            self.current_dhcp_pool = None
             return ""
         elif self.mode == IOSMode.CONFIG:
             self.mode = IOSMode.PRIVILEGED
@@ -182,6 +191,27 @@ class CommandExecutor:
             self.device.hostname = tokens[1]
             return ""
         if v in ("interface", "int") and len(tokens) > 1:
+            # Check for SVI on Switch: "interface vlan 10" or "interface vlan10"
+            if isinstance(self.device, Switch):
+                vid = None
+                if tokens[1].lower() == "vlan" and len(tokens) > 2:
+                    try:
+                        vid = int(tokens[2])
+                    except ValueError:
+                        return "% Invalid VLAN ID."
+                elif tokens[1].lower().startswith("vlan"):
+                    vid_str = tokens[1][4:].strip()
+                    if vid_str.isdigit():
+                        vid = int(vid_str)
+
+                if vid is not None:
+                    if vid not in self.device.vlans:
+                        return f"% VLAN {vid} does not exist."
+                    svi = self.device.create_svi(vid)
+                    self.current_interface = svi
+                    self.mode = IOSMode.CONFIG_IF
+                    return ""
+
             target_name = tokens[1]
             # Check for subinterface (e.g. g0/0.10)
             if "." in target_name and isinstance(self.device, Router):
@@ -208,6 +238,61 @@ class CommandExecutor:
                 return ""
             except ValueError:
                 return "% Invalid VLAN ID."
+
+        # ip default-gateway <ip>
+        if v == "ip" and len(tokens) >= 3 and tokens[1].lower() in ("default-gateway", "default-gw"):
+            gw_ip = tokens[2]
+            if not is_valid_ipv4(gw_ip):
+                return "% Invalid IP address format."
+            self.device.default_gateway = gw_ip
+            return ""
+
+        # no ip default-gateway
+        if v == "no" and len(tokens) >= 3 and tokens[1].lower() == "ip" and tokens[2].lower() in ("default-gateway", "default-gw"):
+            self.device.default_gateway = None
+            return ""
+
+        # ip dhcp pool <name>
+        if v == "ip" and len(tokens) >= 4 and tokens[1].lower() == "dhcp" and tokens[2].lower() == "pool":
+            pool_name = tokens[3]
+            if hasattr(self.device, "dhcp_server") and self.device.dhcp_server:
+                pool = self.device.dhcp_server.create_pool(pool_name)
+                self.current_dhcp_pool = pool
+                self.mode = IOSMode.CONFIG_DHCP_POOL
+                return ""
+            return "% DHCP server not supported on this device."
+
+        # no ip dhcp pool <name>
+        if v == "no" and len(tokens) >= 5 and tokens[1].lower() == "ip" and tokens[2].lower() == "dhcp" and tokens[3].lower() == "pool":
+            pool_name = tokens[4]
+            if hasattr(self.device, "dhcp_server") and self.device.dhcp_server:
+                if self.device.dhcp_server.delete_pool(pool_name):
+                    if self.current_dhcp_pool and self.current_dhcp_pool.name == pool_name:
+                        self.current_dhcp_pool = None
+                        self.mode = IOSMode.CONFIG
+                    return ""
+                return f"% Pool {pool_name} not found."
+            return "% DHCP server not supported on this device."
+
+        # ip dhcp excluded-address <low_ip> [high_ip]
+        if v == "ip" and len(tokens) >= 4 and tokens[1].lower() == "dhcp" and tokens[2].lower() in ("excluded-address", "excluded"):
+            low_ip = tokens[3]
+            high_ip = tokens[4] if len(tokens) > 4 else None
+            if not is_valid_ipv4(low_ip) or (high_ip and not is_valid_ipv4(high_ip)):
+                return "% Invalid IP address format."
+            if hasattr(self.device, "dhcp_server") and self.device.dhcp_server:
+                self.device.dhcp_server.add_excluded_address(low_ip, high_ip)
+                return ""
+            return "% DHCP server not supported on this device."
+
+        # no ip dhcp excluded-address <low_ip> [high_ip]
+        if v == "no" and len(tokens) >= 5 and tokens[1].lower() == "ip" and tokens[2].lower() == "dhcp" and tokens[3].lower() in ("excluded-address", "excluded"):
+            low_ip = tokens[4]
+            high_ip = tokens[5] if len(tokens) > 5 else None
+            if hasattr(self.device, "dhcp_server") and self.device.dhcp_server:
+                self.device.dhcp_server.remove_excluded_address(low_ip, high_ip)
+                return ""
+            return "% DHCP server not supported on this device."
 
         # spanning-tree [vlan <id>] priority <prio>
         if (v.startswith("spanning-tree") or v == "spanning") and isinstance(self.device, Switch):
@@ -289,7 +374,111 @@ class CommandExecutor:
         if v in ("do",):
             # Execute privileged command in config mode
             return self._exec_privileged(tokens[1:])
+        if v in ("show", "sh"):
+            return self._cmd_show(tokens[1:])
         return "% Invalid configuration command."
+
+    def _exec_config_dhcp(self, tokens):
+        if not self.current_dhcp_pool:
+            self.mode = IOSMode.CONFIG
+            return "% No DHCP pool selected."
+
+        v = tokens[0].lower()
+
+        # network <net> <mask4> or network <net>/<prefix>
+        if v == "network" and len(tokens) >= 2:
+            arg = tokens[1]
+            if "/" in arg:
+                parts = arg.split("/")
+                net = parts[0]
+                try:
+                    prefix = int(parts[1])
+                    mask_int = (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF
+                    from network.router import int_to_ip
+                    mask = int_to_ip(mask_int)
+                except Exception:
+                    return "% Invalid subnet prefix."
+            elif len(tokens) >= 3:
+                net = tokens[1]
+                mask = tokens[2]
+            else:
+                return "% Incomplete network command. Usage: network <network-number> [mask | /prefix]"
+
+            if not is_valid_ipv4(net):
+                return "% Invalid IP network address."
+            if not is_valid_netmask(mask):
+                return "% Invalid subnet mask format."
+
+            self.current_dhcp_pool.network = net
+            self.current_dhcp_pool.subnet_mask = mask
+            return ""
+
+        # no network
+        if v == "no" and len(tokens) >= 2 and tokens[1].lower() == "network":
+            self.current_dhcp_pool.network = "0.0.0.0"
+            self.current_dhcp_pool.subnet_mask = "255.255.255.0"
+            return ""
+
+        # default-router <ip> or default-gateway <ip>
+        if v in ("default-router", "default-gateway") and len(tokens) >= 2:
+            gw = tokens[1]
+            if not is_valid_ipv4(gw):
+                return "% Invalid IP address format."
+            self.current_dhcp_pool.default_router = gw
+            return ""
+
+        # no default-router
+        if v == "no" and len(tokens) >= 2 and tokens[1].lower() in ("default-router", "default-gateway"):
+            self.current_dhcp_pool.default_router = None
+            return ""
+
+        # dns-server <ip> [ip2 ...]
+        if v in ("dns-server", "dns") and len(tokens) >= 2:
+            servers = []
+            for ip in tokens[1:]:
+                if is_valid_ipv4(ip):
+                    servers.append(ip)
+            if not servers:
+                return "% Invalid DNS server IP address."
+            self.current_dhcp_pool.dns_servers = servers
+            return ""
+
+        # no dns-server
+        if v == "no" and len(tokens) >= 2 and tokens[1].lower() in ("dns-server", "dns"):
+            self.current_dhcp_pool.dns_servers = []
+            return ""
+
+        # lease <days> [hours] [minutes] or lease infinite
+        if v == "lease" and len(tokens) >= 2:
+            if tokens[1].lower() == "infinite":
+                self.current_dhcp_pool.lease_duration = 365 * 86400
+                return ""
+            try:
+                days = int(tokens[1])
+                hours = int(tokens[2]) if len(tokens) > 2 else 0
+                minutes = int(tokens[3]) if len(tokens) > 3 else 0
+                self.current_dhcp_pool.lease_duration = days * 86400 + hours * 3600 + minutes * 60
+                return ""
+            except ValueError:
+                return "% Invalid lease format. Usage: lease <days> [hours] [minutes] or lease infinite"
+
+        # no lease
+        if v == "no" and len(tokens) >= 2 and tokens[1].lower() == "lease":
+            self.current_dhcp_pool.lease_duration = 86400
+            return ""
+
+        if v == "do":
+            return self._exec_privileged(tokens[1:])
+        if v in ("show", "sh"):
+            return self._cmd_show(tokens[1:])
+
+        # Transitions to global commands
+        if v in ("interface", "int", "ip", "vlan", "hostname"):
+            self.mode = IOSMode.CONFIG
+            self.current_dhcp_pool = None
+            return self._exec_config(tokens)
+
+        return "% Invalid DHCP pool configuration command."
 
     def _exec_config_if(self, tokens):
         if not self.current_interface:
@@ -312,11 +501,53 @@ class CommandExecutor:
             return (f"% Interface {self.current_interface.name}, changed state to up\n"
                     f"% LINEPROTO-5-UPDOWN: Line protocol on Interface {self.current_interface.name}, changed state to {state}")
 
+        # no ip address
+        if len(tokens) >= 3 and tokens[0].lower() == "no" and tokens[1].lower() == "ip" and tokens[2].lower() == "address":
+            self.current_interface.ip_address = None
+            self.current_interface.subnet_mask = None
+            setattr(self.current_interface, "ip_method", "manual")
+            return ""
+
+        # ip default-gateway / no ip default-gateway
+        if tokens[0].lower() == "ip" and len(tokens) >= 3 and tokens[1].lower() in ("default-gateway", "default-gw"):
+            return self._exec_config(tokens)
+        if len(tokens) >= 3 and tokens[0].lower() == "no" and tokens[1].lower() == "ip" and tokens[2].lower() in ("default-gateway", "default-gw"):
+            return self._exec_config(tokens)
+
+        # IP address assignment via DHCP: "ip address dhcp"
+        if tokens[0].lower() == "ip" and len(tokens) >= 3 and tokens[1].lower() == "address" and tokens[2].lower() == "dhcp":
+            setattr(self.current_interface, "ip_method", "DHCP")
+            ok, res = self.packet_engine.simulate_dhcp_dora(self.device, self.current_interface)
+            if ok:
+                return ""
+            else:
+                return f"% DHCP failed: {res}"
+
         # IP address assignment
         if tokens[0].lower() == "ip" and len(tokens) >= 4 and tokens[1].lower() == "address":
             ip, mask = tokens[2], tokens[3]
+            if not is_valid_ipv4(ip):
+                return "% Invalid IP address format."
+            if not is_valid_netmask(mask):
+                return "% Invalid subnet mask format."
+
+            # Check duplicate IP on the same device
+            if hasattr(self.device, "ports"):
+                for p in self.device.ports.values():
+                    if p != self.current_interface and p.ip_address == ip:
+                        return f"% IP address {ip} already assigned to interface {p.name}."
+            if hasattr(self.device, "subinterfaces"):
+                for sub in self.device.subinterfaces.values():
+                    if sub != self.current_interface and sub.ip_address == ip:
+                        return f"% IP address {ip} already assigned to interface {sub.name}."
+            if hasattr(self.device, "svis"):
+                for svi in self.device.svis.values():
+                    if svi != self.current_interface and svi.ip_address == ip:
+                        return f"% IP address {ip} already assigned to interface {svi.name}."
+
             self.current_interface.ip_address = ip
             self.current_interface.subnet_mask = mask
+            setattr(self.current_interface, "ip_method", "manual")
             return ""
 
         # ip access-group <acl> in|out (Router)
@@ -392,6 +623,8 @@ class CommandExecutor:
 
         if tokens[0].lower() == "do":
             return self._exec_privileged(tokens[1:])
+        if tokens[0].lower() in ("show", "sh"):
+            return self._cmd_show(tokens[1:])
 
         return "% Invalid interface command."
 
@@ -403,6 +636,12 @@ class CommandExecutor:
             name = tokens[1]
             self.device.add_vlan(self.current_vlan_id, name)
             return ""
+        if tokens[0].lower() in ("interface", "int", "vlan", "hostname", "ip", "no"):
+            self.mode = IOSMode.CONFIG
+            self.current_vlan_id = None
+            return self._exec_config(tokens)
+        if tokens[0].lower() == "do":
+            return self._exec_privileged(tokens[1:])
         return "% Invalid vlan command."
 
     def _cmd_ping(self, args):
@@ -563,7 +802,155 @@ class CommandExecutor:
         if sub in ("run", "running-config", "running"):
             return self._show_running_config()
 
+        # show ip dhcp pool
+        if sub in ("ip dhcp pool", "ip dhcp pools") or sub.startswith("ip dhcp pool"):
+            return self._show_ip_dhcp_pool(args)
+
+        # show ip dhcp binding
+        if sub in ("ip dhcp binding", "ip dhcp bindings") or sub.startswith("ip dhcp binding"):
+            return self._show_ip_dhcp_binding()
+
+        # show ip dhcp statistics / server statistics
+        if sub in ("ip dhcp stat", "ip dhcp stats", "ip dhcp statistics", "ip dhcp server statistics"):
+            return self._show_ip_dhcp_statistics()
+
+        # show interfaces [vlan <id>] / show int [vlan <id>]
+        if sub in ("int", "interface", "interfaces") or sub.startswith("int ") or sub.startswith("interface ") or sub.startswith("interfaces "):
+            return self._show_interface(args)
+
         return f"% Show command '{sub}' not recognized."
+
+    def _show_ip_dhcp_pool(self, args):
+        if not hasattr(self.device, "dhcp_server") or not self.device.dhcp_server:
+            return "% DHCP server not supported on this device."
+        server = self.device.dhcp_server
+        if not server.pools:
+            return "No DHCP pools configured."
+
+        tokens = [x.lower() for x in args]
+        specific_pool = None
+        for i, t in enumerate(tokens):
+            if t == "pool" and i + 1 < len(args):
+                specific_pool = args[i + 1]
+                break
+
+        lines = []
+        pools_to_show = [server.pools[specific_pool]] if (specific_pool and specific_pool in server.pools) else server.pools.values()
+
+        for pool in pools_to_show:
+            total = pool.get_total_addresses()
+            leased = sum(1 for lease in server.binding_table.values() if lease.pool_name == pool.name)
+            excluded_count = sum(1 for ip in server.excluded_addresses if pool.is_ip_in_pool(ip))
+            first_ip, last_ip = pool.get_usable_ip_range()
+            range_str = f"{first_ip} .. {last_ip}" if first_ip else "none"
+            idx_ip = first_ip or "0.0.0.0"
+
+            lines.extend([
+                f"Pool {pool.name} :",
+                f" Utilization mark (high/low)    : 100 / 0",
+                f" Subnet size (lines/batches)    : {total}/0",
+                f" Total addresses                : {total}",
+                f" Leased addresses               : {leased}",
+                f" Excluded addresses             : {excluded_count}",
+                f" Pending addresses              : 0",
+                f" 1 Subnet is currently in the pool :",
+                f" Current index        IP address range                    Leased/Excluded/Total",
+                f" {idx_ip:<20} {range_str:<35} {leased}    / {excluded_count:<8} / {total}",
+                ""
+            ])
+
+        return "\n".join(lines).strip()
+
+    def _show_ip_dhcp_binding(self):
+        if not hasattr(self.device, "dhcp_server") or not self.device.dhcp_server:
+            return "% DHCP server not supported on this device."
+        server = self.device.dhcp_server
+        lines = [
+            "Bindings from all pools :",
+            f"{'IP address':<20}{'Client-ID/':<24}{'Lease expiration':<24}{'Type'}",
+            f"{'':<20}{'Hardware address/':<24}{'':<24}{''}",
+            f"{'':<20}{'User name':<24}{'':<24}{''}"
+        ]
+        if not server.binding_table:
+            return "\n".join(lines)
+
+        for ip, lease in sorted(server.binding_table.items()):
+            c_mac = format_cisco_mac(lease.mac_address)
+            exp = lease.lease_expiration
+            lines.append(f"{ip:<20}{c_mac:<24}{exp:<24}Automatic")
+        return "\n".join(lines)
+
+    def _show_ip_dhcp_statistics(self):
+        if not hasattr(self.device, "dhcp_server") or not self.device.dhcp_server:
+            return "% DHCP server not supported on this device."
+        server = self.device.dhcp_server
+        stats = server.statistics
+        total_pools = len(server.pools)
+        bindings = len(server.binding_table)
+
+        lines = [
+            "Memory used                     25600",
+            f"Server configuration modes      {total_pools}",
+            "Server interfaces               1",
+            "",
+            f"Address pools                   {total_pools}",
+            "Database agents                 0",
+            f"Automatic bindings              {bindings}",
+            "Manual bindings                 0",
+            "Expired bindings                0",
+            "Malformed messages              0",
+            "Secure arp entries              0",
+            "",
+            "Message                         Received",
+            "BOOTREQUEST                     0",
+            f"DHCPDISCOVER                    {stats.get('discover', 0)}",
+            f"DHCPREQUEST                     {stats.get('request', 0)}",
+            "DHCPDECLINE                     0",
+            f"DHCPRELEASE                     {stats.get('release', 0)}",
+            "DHCPINFORM                      0",
+            "",
+            "Message                         Sent",
+            "BOOTREPLY                       0",
+            f"DHCPOFFER                       {stats.get('offer', 0)}",
+            f"DHCPACK                         {stats.get('ack', 0)}",
+            f"DHCPNAK                         {stats.get('nak', 0)}"
+        ]
+        return "\n".join(lines)
+
+    def _show_interface(self, args):
+        tokens = [x.lower() for x in args]
+        target_name = None
+        if len(tokens) >= 3 and tokens[1] == "vlan":
+            target_name = f"Vlan{tokens[2]}"
+        elif len(tokens) >= 2:
+            target_name = tokens[1]
+
+        if target_name and isinstance(self.device, Switch):
+            intf = self.device.get_interface(target_name)
+            if intf and isinstance(intf, SVI):
+                status = "administratively down" if intf.is_shutdown else "up"
+                proto = "up" if intf.is_link_up else "down"
+                ip_info = f"Internet address is {intf.ip_address}/{intf.subnet_mask}" if intf.ip_address else "Internet protocol processing disabled"
+                c_mac = format_cisco_mac(intf.mac_address)
+                lines = [
+                    f"{intf.full_name} is {status}, line protocol is {proto}",
+                    f"  Hardware is EtherSVI, address is {c_mac} (bia {c_mac})",
+                    f"  {ip_info}",
+                    f"  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec",
+                    f"  Encapsulation ARPA, loopback not set",
+                ]
+                return "\n".join(lines)
+            elif intf:
+                status = "administratively down" if intf.is_shutdown else ("up" if intf.cable else "down")
+                proto = "up" if intf.is_link_up else "down"
+                lines = [
+                    f"{intf.full_name} is {status}, line protocol is {proto}",
+                    f"  Hardware is Gigabit Ethernet, address is {format_cisco_mac(intf.mac_address)}",
+                    f"  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec"
+                ]
+                return "\n".join(lines)
+            return f"% Interface {target_name} does not exist"
+        return self._show_ip_int_brief()
 
     def _show_ip_int_brief(self):
         lines = [
@@ -575,7 +962,8 @@ class CommandExecutor:
             ip = port.ip_address if port.ip_address else "unassigned"
             status = "administratively down" if port.is_shutdown else ("up" if port.cable else "down")
             proto = "up" if port.is_link_up else "down"
-            lines.append(f"{port.name:<24}{ip:<16}{'YES':<6}{'manual':<8}{status:<22}{proto}")
+            method = getattr(port, "ip_method", "manual") if port.ip_address else "unset"
+            lines.append(f"{port.name:<24}{ip:<16}{'YES':<6}{method:<8}{status:<22}{proto}")
 
         # Subinterfaces
         if isinstance(self.device, Router):
@@ -583,7 +971,17 @@ class CommandExecutor:
                 ip = sub.ip_address if sub.ip_address else "unassigned"
                 status = "administratively down" if sub.is_shutdown else ("up" if sub.is_link_up else "down")
                 proto = "up" if sub.is_link_up else "down"
-                lines.append(f"{sub.name:<24}{ip:<16}{'YES':<6}{'manual':<8}{status:<22}{proto}")
+                method = getattr(sub, "ip_method", "manual") if sub.ip_address else "unset"
+                lines.append(f"{sub.name:<24}{ip:<16}{'YES':<6}{method:<8}{status:<22}{proto}")
+
+        # SVIs
+        if isinstance(self.device, Switch) and hasattr(self.device, "svis"):
+            for vid, svi in sorted(self.device.svis.items()):
+                ip = svi.ip_address if svi.ip_address else "unassigned"
+                status = "administratively down" if svi.is_shutdown else ("up" if svi.is_link_up else "down")
+                proto = "up" if svi.is_link_up else "down"
+                method = getattr(svi, "ip_method", "manual") if svi.ip_address else "unset"
+                lines.append(f"{svi.name:<24}{ip:<16}{'YES':<6}{method:<8}{status:<22}{proto}")
 
         return "\n".join(lines)
 
@@ -808,6 +1206,26 @@ class CommandExecutor:
             f"hostname {self.device.hostname}",
             "!"
         ]
+        if hasattr(self.device, "dhcp_server") and self.device.dhcp_server:
+            srv = self.device.dhcp_server
+            for low, high in getattr(srv, "excluded_ranges", []):
+                if low == high:
+                    lines.append(f"ip dhcp excluded-address {low}")
+                else:
+                    lines.append(f"ip dhcp excluded-address {low} {high}")
+            for pname, p in srv.pools.items():
+                lines.append(f"ip dhcp pool {pname}")
+                if p.network and p.subnet_mask:
+                    lines.append(f" network {p.network} {p.subnet_mask}")
+                if p.default_router:
+                    lines.append(f" default-router {p.default_router}")
+                if p.dns_servers:
+                    lines.append(f" dns-server {' '.join(p.dns_servers)}")
+                if p.lease_duration != 86400:
+                    days = p.lease_duration // 86400
+                    lines.append(f" lease {days}")
+                lines.append("!")
+
         if isinstance(self.device, Switch):
             for vid, vdata in self.device.vlans.items():
                 if vid != 1:
@@ -819,7 +1237,9 @@ class CommandExecutor:
                 lines.append(" switchport mode trunk")
             elif isinstance(self.device, Switch) and port.access_vlan != 1:
                 lines.append(f" switchport access vlan {port.access_vlan}")
-            if port.ip_address:
+            if getattr(port, "ip_method", "manual") == "DHCP":
+                lines.append(" ip address dhcp")
+            elif port.ip_address:
                 lines.append(f" ip address {port.ip_address} {port.subnet_mask}")
             if isinstance(self.device, Router):
                 if port.name in self.device.nat_inside_interfaces:
@@ -832,12 +1252,30 @@ class CommandExecutor:
                 lines.append(" no shutdown")
             lines.append("!")
 
+        if isinstance(self.device, Switch):
+            if hasattr(self.device, "svis"):
+                for vid, svi in sorted(self.device.svis.items()):
+                    lines.append(f"interface {svi.full_name}")
+                    if getattr(svi, "ip_method", "manual") == "DHCP":
+                        lines.append(" ip address dhcp")
+                    elif svi.ip_address:
+                        lines.append(f" ip address {svi.ip_address} {svi.subnet_mask}")
+                    if svi.is_shutdown:
+                        lines.append(" shutdown")
+                    else:
+                        lines.append(" no shutdown")
+                    lines.append("!")
+            if getattr(self.device, "default_gateway", None):
+                lines.append(f"ip default-gateway {self.device.default_gateway}")
+
         if isinstance(self.device, Router):
             for s_name, sub in self.device.subinterfaces.items():
                 lines.append(f"interface {sub.full_name}")
                 if sub.vlan_id:
                     lines.append(f" encapsulation dot1Q {sub.vlan_id}")
-                if sub.ip_address:
+                if getattr(sub, "ip_method", "manual") == "DHCP":
+                    lines.append(" ip address dhcp")
+                elif sub.ip_address:
                     lines.append(f" ip address {sub.ip_address} {sub.subnet_mask}")
                 lines.append("!")
             for acl_id, rules in self.device.access_lists.items():
@@ -953,6 +1391,29 @@ class CommandExecutor:
             return (f"eth0: flags=4163<{state},BROADCAST,RUNNING,MULTICAST>  mtu 1500\n"
                     f"      inet {ip}  netmask {mask}\n"
                     f"      default gateway: {gw}  status: {state}")
+
+        elif v == "dhclient":
+            if len(tokens) > 1 and tokens[1] == "-r":
+                target_if = tokens[2] if len(tokens) > 2 else "eth0"
+                ok, msg = self.device.release_dhcp(target_if)
+                if ok:
+                    return "Killed old client process\nInternet Systems Consortium DHCP Client released IP."
+                return f"dhclient -r failed: {msg}"
+            else:
+                target_if = tokens[1] if len(tokens) > 1 and not tokens[1].startswith("-") else "eth0"
+                ok, msg = self.device.request_dhcp(target_if)
+                if ok:
+                    p = self.device.ports.get(target_if)
+                    ip = p.ip_address if p else ""
+                    server_id = getattr(msg, "server_id", "255.255.255.255")
+                    lease_time = getattr(msg, "lease_time", 86400)
+                    return (f"DHCPDISCOVER on {target_if} to 255.255.255.255 port 67...\n"
+                            f"DHCPOFFER of {ip} from {server_id}\n"
+                            f"DHCPREQUEST for {ip} on {target_if} to 255.255.255.255 port 67...\n"
+                            f"DHCPACK of {ip} from {server_id}\n"
+                            f"bound to {ip} -- renewal in {lease_time} seconds.")
+                return f"dhclient: {msg}"
+
         elif v in ("help", "?", "--help"):
             return (
                 "Supported Linux shell commands:\n"
@@ -961,6 +1422,8 @@ class CommandExecutor:
                 "  arp -a               Display current ARP table\n"
                 "  ifconfig             Display network interface configuration\n"
                 "  ip addr              Display network interface addresses and status\n"
+                "  dhclient             Acquire dynamic IP address via DHCP\n"
+                "  dhclient -r          Release acquired dynamic DHCP lease\n"
                 "  exit                 Close the terminal session"
             )
         return f"bash: {tokens[0]}: command not found"

@@ -14,6 +14,56 @@ def normalize_mac(mac_str):
         return ":".join(clean[i:i+2] for i in range(0, 12, 2))
     return mac_str.lower()
 
+class SVI:
+    """
+    Switch Virtual Interface (SVI) - A logical Layer 3 interface representing a VLAN.
+    In Cisco IOS, SVIs start administratively down and transition to operational UP
+    only when not shutdown and at least one physical port in that VLAN is UP (autostate).
+    """
+    def __init__(self, switch, vlan_id):
+        self.switch = switch
+        self.vlan_id = int(vlan_id)
+        self.name = f"Vlan{self.vlan_id}"
+        self.full_name = f"Vlan{self.vlan_id}"
+        self.ip_address = None
+        self.subnet_mask = None
+        self.is_shutdown = True  # Cisco standard: SVI starts administratively down
+        # MAC address derived from the switch's base MAC
+        self.mac_address = switch.mac_address
+
+    @property
+    def is_link_up(self):
+        """
+        Operational state (Autostate):
+        Returns True only if administratively UP, the VLAN exists and is active,
+        and at least one member physical port in the VLAN is operationally up.
+        """
+        if self.is_shutdown:
+            return False
+        if self.vlan_id not in self.switch.vlans:
+            return False
+        if self.switch.vlans[self.vlan_id].get("status") != "active":
+            return False
+        for p in self.switch.ports.values():
+            if p.port_type == "CONSOLE" or p.is_shutdown or not p.is_link_up:
+                continue
+            if p.mode == "access" and p.access_vlan == self.vlan_id:
+                return True
+            elif p.mode == "trunk" and (self.vlan_id in p.trunk_allowed_vlans or not p.trunk_allowed_vlans):
+                return True
+        return False
+
+    @property
+    def admin_state(self):
+        return "down" if self.is_shutdown else "up"
+
+    @property
+    def oper_state(self):
+        return "up" if self.is_link_up else "down"
+
+    def __repr__(self):
+        return f"<SVI {self.name} IP={self.ip_address} Admin={'DOWN' if self.is_shutdown else 'UP'} Oper={'UP' if self.is_link_up else 'DOWN'}>"
+
 class Switch(BaseDevice):
     def __init__(self, id, hostname="Switch", rack_id=1, u_slot=24, num_ports=8):
         super().__init__(id, hostname, device_type="switch", rack_id=rack_id, u_slot=u_slot)
@@ -23,6 +73,13 @@ class Switch(BaseDevice):
         self.vlans = {
             1: {"name": "default", "status": "active"}
         }
+
+        # SVI (Switch Virtual Interfaces): vlan_id -> SVI
+        self.svis = {}
+        self.default_gateway = None
+
+        from .dhcp import DHCPServer
+        self.dhcp_server = DHCPServer(self)
 
         # MAC Address Table: mac -> {"port": port_name, "vlan": vlan_id, "timestamp": float}
         self.mac_table = {}
@@ -98,6 +155,75 @@ class Switch(BaseDevice):
             for port in self.ports.values():
                 if port.access_vlan == vlan_id:
                     port.access_vlan = 1
+
+    def get_svi(self, vlan_id):
+        """Returns SVI for vlan_id or None."""
+        try:
+            return self.svis.get(int(vlan_id))
+        except (ValueError, TypeError):
+            return None
+
+    def create_svi(self, vlan_id):
+        """Creates or returns SVI for vlan_id. Requires VLAN to exist in self.vlans."""
+        try:
+            vid = int(vlan_id)
+        except (ValueError, TypeError):
+            return None
+        if vid not in self.vlans:
+            return None
+        if vid not in self.svis:
+            self.svis[vid] = SVI(self, vid)
+        return self.svis[vid]
+
+    def remove_svi(self, vlan_id):
+        """Removes SVI for vlan_id."""
+        try:
+            vid = int(vlan_id)
+            if vid in self.svis:
+                del self.svis[vid]
+                return True
+        except (ValueError, TypeError):
+            pass
+        return False
+
+    def get_interface(self, name):
+        """Finds physical port or SVI by name (e.g. g0/1, Vlan10, vlan 10)."""
+        clean = name.strip().lower()
+        if clean.startswith("vlan"):
+            v_str = clean[4:].strip()
+            if v_str.isdigit():
+                return self.get_svi(int(v_str))
+        return self.get_port(name)
+
+    def get_all_routes(self):
+        """Returns directly connected routes for active SVIs with configured IP."""
+        from .router import ip_to_int, int_to_ip
+        routes = []
+        for vid, svi in sorted(self.svis.items()):
+            if svi.is_link_up and svi.ip_address and svi.subnet_mask:
+                net_int = ip_to_int(svi.ip_address) & ip_to_int(svi.subnet_mask)
+                net_str = int_to_ip(net_int)
+                routes.append({
+                    "network": net_str,
+                    "mask": svi.subnet_mask,
+                    "next_hop": "directly connected",
+                    "interface": svi.name,
+                    "type": "C"
+                })
+        return routes
+
+    def get_first_active_port_for_vlan(self, vlan_id):
+        """Returns the first physically UP and STP forwarding port for the given VLAN."""
+        for port in self.ports.values():
+            if port.port_type == "CONSOLE" or port.is_shutdown or not port.cable or not port.is_link_up:
+                continue
+            if self.stp_enabled and getattr(port, "stp_state", "Forwarding") == "Blocking":
+                continue
+            if port.mode == "access" and port.access_vlan == vlan_id:
+                return port
+            if port.mode == "trunk" and (vlan_id in port.trunk_allowed_vlans or not port.trunk_allowed_vlans):
+                return port
+        return None
 
     def get_connected_switches(self):
         """Discovers all reachable switches in the same Layer 2 network component via cables."""

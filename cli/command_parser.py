@@ -37,6 +37,9 @@ COMMAND_HELP = {
         ("show conn", "Display active stateful connection table (Firewall)"),
         ("show vlan brief", "Display VLAN status and port assignments (Switches)"),
         ("show mac address-table", "Display Layer 2 MAC address learning table"),
+        ("show ip dhcp pool", "Display DHCP address pool configuration and status"),
+        ("show ip dhcp binding", "Display active DHCP address leases"),
+        ("show ip dhcp statistics", "Display DHCP message counters"),
         ("clear ip arp", "Flush dynamic ARP address cache"),
         ("clear ip nat translation *", "Clear all dynamic NAT translations"),
         ("clear conn", "Clear active stateful connection table (Firewall)"),
@@ -49,7 +52,11 @@ COMMAND_HELP = {
     ],
     IOSMode.CONFIG: [
         ("hostname <name>", "Set system network device name"),
-        ("interface <name>", "Select an interface to configure (e.g. g0/1, g0/0.10)"),
+        ("interface <name>", "Select an interface to configure (e.g. g0/1, g0/0.10, vlan 10)"),
+        ("ip default-gateway <ip>", "Set default gateway for switch management"),
+        ("ip dhcp pool <name>", "Configure DHCP address pool and enter DHCP config mode"),
+        ("no ip dhcp pool <name>", "Delete DHCP address pool"),
+        ("ip dhcp excluded-address <low> [high]", "Prevent IP range from being dynamically assigned"),
         ("access-list <id> permit <source> [wildcard]", "Define standard IP access list (Router)"),
         ("access-list <name> extended permit <proto> <src> <dst>", "Define extended ACL (Firewall)"),
         ("access-group <name> in interface <zone>", "Apply ACL to interface zone (Firewall)"),
@@ -64,6 +71,8 @@ COMMAND_HELP = {
     ],
     IOSMode.CONFIG_IF: [
         ("ip address <ip> <subnet>", "Set interface IPv4 address and subnet mask"),
+        ("ip address dhcp", "Acquire IP address dynamically via DHCP"),
+        ("no ip address", "Remove interface IP address"),
         ("no shutdown", "Administratively bring interface UP"),
         ("shutdown", "Administratively bring interface DOWN"),
         ("ip nat inside", "Designate interface as inside NAT network (Router)"),
@@ -94,6 +103,14 @@ COMMAND_HELP = {
         ("help / ?", "Display VLAN commands"),
         ("exit", "Exit from VLAN configure mode"),
         ("end", "Exit to privileged EXEC mode"),
+    ],
+    IOSMode.CONFIG_DHCP_POOL: [
+        ("network <net> <mask>", "Subnet network number and mask for the pool"),
+        ("default-router <ip>", "Default gateway IPv4 address for DHCP clients"),
+        ("dns-server <ip>", "DNS server IPv4 addresses"),
+        ("lease <days> [hours] [min]", "DHCP lease duration"),
+        ("exit", "Exit from DHCP configuration mode"),
+        ("end", "Exit to privileged EXEC mode"),
     ]
 }
 
@@ -117,6 +134,10 @@ class CommandParser:
             ports = list(self.executor.device.ports.keys())
             if isinstance(self.executor.device, Router):
                 ports.extend(list(self.executor.device.subinterfaces.keys()))
+            if hasattr(self.executor.device, "vlans"):
+                for vid in self.executor.device.vlans.keys():
+                    ports.append(f"vlan {vid}")
+                    ports.append(f"Vlan{vid}")
             prefix = tokens[1].lower() if len(tokens) > 1 else ""
             matches = [p for p in ports if p.lower().startswith(prefix)]
             return matches

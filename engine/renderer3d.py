@@ -85,7 +85,7 @@ class Renderer3D:
 
     def invalidate_device(self, dev):
         """Invalidates and frees cached display lists for a specific device."""
-        for attr in ("_dl_front", "_dl_rear"):
+        for attr in ("_dl_body", "_dl_front", "_dl_rear"):
             dl = getattr(dev, attr, None)
             if dl is not None:
                 try:
@@ -929,6 +929,14 @@ class Renderer3D:
             if dev.device_type == "laptop":
                 self._render_laptop(dev, current_time)
             else:
+                # Compile Solid Chassis Body display list if not present
+                if getattr(dev, "_dl_body", None) is None:
+                    dev._dl_body = glGenLists(1)
+                    self._device_display_lists.add(dev._dl_body)
+                    glNewList(dev._dl_body, GL_COMPILE)
+                    self._compile_device_body(dev)
+                    glEndList()
+
                 # Compile Front static display list if not present
                 if getattr(dev, "_dl_front", None) is None:
                     dev._dl_front = glGenLists(1)
@@ -946,6 +954,9 @@ class Renderer3D:
                         self._compile_device_rear(dev)
                         glEndList()
 
+                # Always render solid 3D chassis enclosure (visible from front, rear, and all camera angles)
+                glCallList(dev._dl_body)
+
                 # Render Front if visible
                 if is_front_visible:
                     glCallList(dev._dl_front)
@@ -958,11 +969,53 @@ class Renderer3D:
 
             glPopMatrix()
 
-    def _compile_device_front(self, dev):
-        """Compiles static chassis, bezels, ears, ports, and heat sinks into an OpenGL display list."""
-        body_color = (0.16, 0.18, 0.22)
-        self._draw_box(0.0, 0.0, 0.0, dev.width, dev.height, dev.depth, body_color)
+    def _compile_device_body(self, dev):
+        """Compiles 3D solid steel chassis, top/bottom sheet metal, and side slide mounting rails into an OpenGL display list."""
+        hw = dev.width / 2.0
+        hh = dev.height / 2.0
+        hd = dev.depth / 2.0
+        chassis_w = dev.width - 0.042  # ~0.438m wide, fits inside 19" EIA rack aperture
+        chassis_h = dev.height - 0.002 # leaves 1mm clearance top & bottom
+        chassis_d = dev.depth          # 0.60m full depth
 
+        # 1. Main Structural Cold-Rolled Steel Chassis Enclosure
+        # Dark charcoal / matte enterprise appliance finish
+        self._draw_box(0.0, 0.0, 0.0, chassis_w, chassis_h, chassis_d, (0.15, 0.16, 0.19))
+
+        # 2. Top Sheet Metal Cover Plate (Galvanized / Brushed Aluminum Finish)
+        # Prevents any hollow gaps when viewing device from above
+        top_y = hh - 0.0008
+        self._draw_box(0.0, top_y, 0.0, chassis_w - 0.004, 0.0016, chassis_d - 0.008, (0.22, 0.24, 0.28))
+        # Top cover stamping stiffener grooves
+        self._draw_box(0.0, hh, 0.0, chassis_w - 0.040, 0.0004, chassis_d - 0.080, (0.18, 0.20, 0.23))
+
+        # 3. Bottom Chassis Plate (Underside Stiffener)
+        # Prevents any hollow gaps when viewing device from below
+        bot_y = -hh + 0.0008
+        self._draw_box(0.0, bot_y, 0.0, chassis_w - 0.004, 0.0016, chassis_d - 0.008, (0.11, 0.12, 0.14))
+
+        # 4. Left & Right Heavy-Duty 4-Post Inner Slide Mounting Rails (Tool-less Slide Rail Kit)
+        # Running the full 60cm depth on both left and right sides
+        rail_h = max(0.024, dev.height - 0.006)
+        rail_w = 0.010
+        for sx in [-hw + 0.012, hw - 0.012]:
+            # Galvanized steel rail body spanning the full chassis depth
+            self._draw_box(sx, 0.0, 0.0, rail_w, rail_h, chassis_d + 0.04, (0.55, 0.58, 0.64))
+            # Ball bearing guide channel recess
+            self._draw_box(sx, 0.0, 0.0, rail_w + 0.002, rail_h * 0.45, chassis_d, (0.35, 0.38, 0.44))
+            # Rear EIA rail locking bracket clamp at the rear post (-hd - 0.035)
+            self._draw_box(sx, 0.0, -hd - 0.035, 0.018, dev.height - 0.002, 0.035, (0.42, 0.46, 0.52))
+            # Quick-release latch button on rear bracket
+            latch_col = (0.0, 0.55, 0.95) if sx < 0 else (0.95, 0.50, 0.10)
+            self._draw_box(sx, 0.0, -hd - 0.025, 0.020, 0.010, 0.010, latch_col)
+
+        # 5. Side Ventilation Louvers along full depth
+        for sx in [-chassis_w / 2.0 - 0.0005, chassis_w / 2.0 + 0.0005]:
+            for vz in [-0.16, -0.06, 0.06, 0.16]:
+                self._draw_box(sx, 0.0, vz, 0.001, dev.height * 0.55, 0.065, (0.08, 0.09, 0.11))
+
+    def _compile_device_front(self, dev):
+        """Compiles static bezels, ears, ports, and heat sinks into an OpenGL display list."""
         if dev.device_type == "switch":
             self._render_switch(dev, 0.0)
         elif dev.device_type == "router":
@@ -1698,16 +1751,18 @@ class Renderer3D:
         """
         hw = dev.width / 2.0
         hh = dev.height / 2.0
+        hd = dev.depth / 2.0
+        chassis_w = dev.width - 0.042
         back_z = -dev.depth / 2.0
 
         # 1. Rear Metal Backplate (Galvanized / Charcoal Anodized Steel)
-        self._draw_box(0.0, 0.0, back_z - 0.001, dev.width - 0.03, dev.height - 0.004, 0.002, (0.13, 0.14, 0.17))
+        self._draw_box(0.0, 0.0, back_z - 0.001, chassis_w, dev.height - 0.004, 0.002, (0.13, 0.14, 0.17))
         # Top and Bottom Chassis Flange Lips
-        self._draw_box(0.0, hh - 0.002, back_z - 0.002, dev.width - 0.02, 0.003, 0.003, (0.28, 0.30, 0.35))
-        self._draw_box(0.0, -hh + 0.002, back_z - 0.002, dev.width - 0.02, 0.003, 0.003, (0.28, 0.30, 0.35))
+        self._draw_box(0.0, hh - 0.002, back_z - 0.002, chassis_w, 0.003, 0.003, (0.28, 0.30, 0.35))
+        self._draw_box(0.0, -hh + 0.002, back_z - 0.002, chassis_w, 0.003, 0.003, (0.28, 0.30, 0.35))
 
         # 2. Chassis Safety Earth Grounding Lug on Corner
-        lug_x = -hw + 0.024
+        lug_x = -chassis_w / 2.0 + 0.024
         lug_y = -hh + 0.010
         self._draw_box(lug_x, lug_y, back_z - 0.003, 0.014, 0.010, 0.003, (0.88, 0.58, 0.22))
         self._draw_box(lug_x - 0.003, lug_y, back_z - 0.005, 0.004, 0.004, 0.002, (0.75, 0.78, 0.82))
