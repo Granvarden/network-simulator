@@ -142,7 +142,7 @@ class Renderer3D:
         self._render_room(now)
 
         # 2. Render 42U Server Racks with Status Beacons, Fans & PDUs
-        self._render_server_racks(now)
+        self._render_server_racks(now, camera=camera)
 
         # 3. Render Engineer Dual-Screen NOC Workbench
         self._render_workbench(now)
@@ -1137,7 +1137,7 @@ class Renderer3D:
 
             glPopMatrix()
 
-    def _render_server_racks(self, now):
+    def _render_server_racks(self, now, camera=None):
         if self.racks_display_list is None:
             self._init_display_lists()
         glCallList(self.racks_display_list)
@@ -1365,13 +1365,37 @@ class Renderer3D:
                 self._draw_box(px + 0.004, py - 0.014, pz + 0.0035, 0.005, 0.005, 0.002, act_c)
 
         elif dev.device_type == "server":
-            hh = dev.height / 2.0
             front_z = dev.depth / 2.0 + 0.003
+            # 1. Round Illuminated Power Button at (0.19, 0.024)
             power_col = (0.1, 0.98, 0.2) if dev.is_powered else (0.08, 0.12, 0.08)
-            self._draw_box(-0.19, hh - 0.012, front_z + 0.0035, 0.006, 0.006, 0.002, power_col)
-            hdd_blink = dev.is_powered and (int(now * 9) % 2 == 0)
-            hdd_col = (0.2, 0.85, 0.98) if hdd_blink else (0.06, 0.14, 0.20)
-            self._draw_box(-0.178, hh - 0.012, front_z + 0.0035, 0.005, 0.005, 0.002, hdd_col)
+            self._draw_box(0.19, 0.024, front_z + 0.0040, 0.016, 0.016, 0.002, power_col)
+
+            # 2. Hot-Swap Drive Bays Activity LEDs (all 8 bays flicker dynamically at runtime)
+            if dev.is_powered:
+                for bay in range(8):
+                    bx = -0.16 + (bay % 4) * 0.065
+                    by = 0.018 if bay < 4 else -0.022
+                    drive_blink = (int(now * 12 + bay * 5) % 3 == 0) or (int(now * 8 + bay * 3) % 4 == 0)
+                    drive_c = (0.15, 0.98, 0.25) if drive_blink else (0.04, 0.14, 0.04)
+                    self._draw_box(bx + 0.022, by + 0.008, front_z + 0.0050, 0.005, 0.005, 0.002, drive_c)
+
+                # 3. Diagnostic LCD Backlight and telemetry segments
+                lcd_pulse = 0.85 + 0.15 * math.sin(now * 3.0)
+                for seg in range(4):
+                    sx = 0.120 + seg * 0.012
+                    self._draw_box(sx, -0.002, front_z + 0.0040, 0.009, 0.003, 0.001, (0.0, 0.85 * lcd_pulse, 0.95 * lcd_pulse))
+
+            # 4. eth0 Network Port Dynamic Link & Activity LEDs
+            port = dev.ports.get("eth0")
+            if port:
+                px, py, pz = dev.get_port_local_pos(port.name, port.port_index)
+                led = port.get_led_state(now)
+                link_c = (0.1, 0.98, 0.2) if led in (LEDState.GREEN, LEDState.BLINK_GREEN) else ((1.0, 0.65, 0.05) if led == LEDState.AMBER else (0.08, 0.12, 0.08))
+                self._draw_box(px - 0.004, py + 0.014, pz + 0.0035, 0.005, 0.005, 0.002, link_c)
+
+                act_blink = (led in (LEDState.GREEN, LEDState.BLINK_GREEN)) and (int(now * 14) % 2 == 0)
+                act_c = (0.2, 0.95, 0.3) if act_blink else (0.06, 0.10, 0.06)
+                self._draw_box(px + 0.004, py + 0.014, pz + 0.0035, 0.005, 0.005, 0.002, act_c)
 
         elif dev.device_type == "firewall":
             data_ports = [p for p in dev.ports.values() if p.port_type != "CONSOLE" and not p.name.startswith("m")]
@@ -1551,30 +1575,33 @@ class Renderer3D:
         # 1. Front Faceplate (Cisco Catalyst Metallic Teal-Blue)
         self._draw_box(0.0, 0.0, front_z, dev.width, dev.height, 0.006, (0.14, 0.32, 0.42))
 
-        # 2. Cisco Cyan Accent Stripe across top of faceplate
-        self._draw_box(0.0, hh - 0.004, front_z + 0.001, dev.width - 0.04, 0.005, 0.002, (0.0, 0.75, 0.92))
+        # 2. Cisco Cyan Accent Stripe across top of faceplate (crisply in front of faceplate)
+        self._draw_box(0.0, hh - 0.004, front_z + 0.0025, dev.width - 0.04, 0.005, 0.002, (0.0, 0.75, 0.92))
 
         # 3. Left Corner: System Status LED Cluster (SYST, RPS, STAT, SPEED)
         led_names = [(-0.20, "SYST"), (-0.185, "RPS"), (-0.170, "STAT"), (-0.155, "SPEED")]
         for lx, _ in led_names:
-            self._draw_box(lx, hh - 0.015, front_z + 0.002, 0.005, 0.005, 0.002, (0.1, 0.98, 0.2))
+            self._draw_box(lx, hh - 0.015, front_z + 0.0025, 0.005, 0.005, 0.002, (0.1, 0.98, 0.2))
 
         # 4. Baby Blue RJ45 Console Port on the left
         con_port = dev.ports.get("con0")
         if con_port:
             cx, cy, cz = dev.get_port_local_pos(con_port.name, con_port.port_index)
-            self._draw_box(cx, cy, cz, 0.024, 0.018, 0.003, (0.2, 0.65, 0.95))
-            self._draw_box(cx, cy, cz + 0.002, 0.018, 0.014, 0.002, (0.05, 0.08, 0.12))
+            self._draw_box(cx, cy, cz, 0.024, 0.018, 0.002, (0.2, 0.65, 0.95))
+            self._draw_box(cx, cy, cz + 0.0012, 0.018, 0.014, 0.0016, (0.05, 0.08, 0.12))
+            self._draw_box(cx, cy + 0.003, cz + 0.0022, 0.011, 0.003, 0.0012, (0.90, 0.78, 0.18))
 
         # 5. Right Intake Cooling Vent Grille
-        self._draw_box(0.20, 0.0, front_z + 0.001, 0.06, dev.height - 0.015, 0.002, (0.09, 0.12, 0.16))
+        self._draw_box(0.20, 0.0, front_z + 0.0035, 0.06, dev.height - 0.015, 0.002, (0.09, 0.12, 0.16))
+        for vs in range(5):
+            self._draw_box(0.18 + vs * 0.010, 0.0, front_z + 0.0045, 0.003, dev.height - 0.020, 0.0015, (0.22, 0.26, 0.32))
 
         # 6. Metal Rack-Mount Ear Brackets & Screws on sides
-        self._draw_box(-hw + 0.01, 0.0, front_z + 0.001, 0.02, dev.height, 0.005, (0.45, 0.48, 0.52))
-        self._draw_box(hw - 0.01, 0.0, front_z + 0.001, 0.02, dev.height, 0.005, (0.45, 0.48, 0.52))
+        self._draw_box(-hw + 0.01, 0.0, front_z + 0.002, 0.02, dev.height, 0.005, (0.48, 0.52, 0.56))
+        self._draw_box(hw - 0.01, 0.0, front_z + 0.002, 0.02, dev.height, 0.005, (0.48, 0.52, 0.56))
         # Shiny screw heads
-        self._draw_box(-hw + 0.01, 0.0, front_z + 0.004, 0.008, 0.008, 0.002, (0.85, 0.88, 0.92))
-        self._draw_box(hw - 0.01, 0.0, front_z + 0.004, 0.008, 0.008, 0.002, (0.85, 0.88, 0.92))
+        self._draw_box(-hw + 0.01, 0.0, front_z + 0.0045, 0.008, 0.008, 0.002, (0.85, 0.88, 0.92))
+        self._draw_box(hw - 0.01, 0.0, front_z + 0.0045, 0.008, 0.008, 0.002, (0.85, 0.88, 0.92))
 
         # 7. Ports with Dual-LEDs (Link LED + Activity LED)
         port_list = [p for p in dev.ports.values() if p.port_type != "CONSOLE"]
@@ -1582,11 +1609,11 @@ class Renderer3D:
             px, py, pz = dev.get_port_local_pos(port.name, port.port_index)
 
             # Metallic Port Shield Frame
-            self._draw_box(px, py, pz, 0.025, 0.020, 0.004, (0.52, 0.55, 0.58))
+            self._draw_box(px, py, pz, 0.026, 0.020, 0.002, (0.55, 0.58, 0.62))
             # Dark Recessed Socket Interior
-            self._draw_box(px, py, pz + 0.002, 0.020, 0.015, 0.003, (0.03, 0.03, 0.04))
+            self._draw_box(px, py, pz + 0.0012, 0.020, 0.015, 0.0016, (0.03, 0.03, 0.04))
             # Gold pin contacts inside socket
-            self._draw_box(px, py + 0.003, pz + 0.003, 0.012, 0.003, 0.001, (0.85, 0.72, 0.15))
+            self._draw_box(px, py + 0.003, pz + 0.0022, 0.012, 0.003, 0.0012, (0.92, 0.80, 0.18))
 
             # LED 1: Upper Link/Speed LED
             led = port.get_led_state(now)
@@ -1598,12 +1625,12 @@ class Renderer3D:
                 link_c = (1.0, 0.65, 0.05)
             else:
                 link_c = (0.08, 0.12, 0.08)
-            self._draw_box(px - 0.005, py + 0.016, pz + 0.003, 0.006, 0.006, 0.003, link_c)
+            self._draw_box(px - 0.005, py + 0.016, pz + 0.002, 0.006, 0.006, 0.002, link_c)
 
             # LED 2: Lower Activity LED (Blinks with network activity)
             act_blink = (led in (LEDState.GREEN, LEDState.BLINK_GREEN)) and (int(now * 14 + idx) % 2 == 0)
             act_c = (0.2, 0.95, 0.3) if act_blink else (0.06, 0.10, 0.06)
-            self._draw_box(px + 0.005, py + 0.016, pz + 0.003, 0.006, 0.006, 0.003, act_c)
+            self._draw_box(px + 0.005, py + 0.016, pz + 0.002, 0.006, 0.006, 0.002, act_c)
 
     def _render_router(self, dev, now):
         """High-detail Cisco ISR 2U Router with NIM slots & SFP cages."""
@@ -1617,32 +1644,35 @@ class Renderer3D:
         # 2. Dual Modular NIM Slot Expansion Bays (Top Tier)
         for mx in [-0.08, 0.08]:
             # Slot blank / cover plate
-            self._draw_box(mx, 0.022, front_z + 0.002, 0.14, 0.034, 0.003, (0.14, 0.16, 0.22))
+            self._draw_box(mx, 0.022, front_z + 0.0025, 0.14, 0.034, 0.003, (0.14, 0.16, 0.22))
             # Thumbscrews on expansion slot
-            self._draw_box(mx - 0.06, 0.022, front_z + 0.004, 0.007, 0.007, 0.002, (0.75, 0.78, 0.82))
-            self._draw_box(mx + 0.06, 0.022, front_z + 0.004, 0.007, 0.007, 0.002, (0.75, 0.78, 0.82))
+            self._draw_box(mx - 0.06, 0.022, front_z + 0.0045, 0.007, 0.007, 0.002, (0.75, 0.78, 0.82))
+            self._draw_box(mx + 0.06, 0.022, front_z + 0.0045, 0.007, 0.007, 0.002, (0.75, 0.78, 0.82))
 
         # 3. Status LED Cluster (PWR, SYS, ACT, POE) on the left
         status_leds = [(-0.18, 0.025), (-0.165, 0.025), (-0.18, 0.012), (-0.165, 0.012)]
         for sx, sy in status_leds:
-            self._draw_box(sx, sy, front_z + 0.002, 0.006, 0.006, 0.002, (0.1, 0.95, 0.2))
+            self._draw_box(sx, sy, front_z + 0.0025, 0.006, 0.006, 0.002, (0.1, 0.95, 0.2))
 
         # 4. Cooling Fin Ventilation Slats
-        self._draw_box(0.18, 0.0, front_z + 0.001, 0.08, dev.height - 0.02, 0.002, (0.12, 0.14, 0.18))
+        self._draw_box(0.18, 0.0, front_z + 0.0035, 0.08, dev.height - 0.02, 0.002, (0.12, 0.14, 0.18))
+        for fs in range(7):
+            self._draw_box(0.15 + fs * 0.010, 0.0, front_z + 0.0045, 0.003, dev.height - 0.024, 0.0015, (0.25, 0.28, 0.35))
 
         # 5. Heavy-Duty Rack Mount Ears with 4 screws
-        self._draw_box(-hw + 0.01, 0.0, front_z + 0.001, 0.02, dev.height, 0.005, (0.42, 0.45, 0.50))
-        self._draw_box(hw - 0.01, 0.0, front_z + 0.001, 0.02, dev.height, 0.005, (0.42, 0.45, 0.50))
+        self._draw_box(-hw + 0.01, 0.0, front_z + 0.002, 0.02, dev.height, 0.005, (0.45, 0.48, 0.54))
+        self._draw_box(hw - 0.01, 0.0, front_z + 0.002, 0.02, dev.height, 0.005, (0.45, 0.48, 0.54))
         for sy in [-0.025, 0.025]:
-            self._draw_box(-hw + 0.01, sy, front_z + 0.004, 0.007, 0.007, 0.002, (0.85, 0.88, 0.92))
-            self._draw_box(hw - 0.01, sy, front_z + 0.004, 0.007, 0.007, 0.002, (0.85, 0.88, 0.92))
+            self._draw_box(-hw + 0.01, sy, front_z + 0.0045, 0.007, 0.007, 0.002, (0.85, 0.88, 0.92))
+            self._draw_box(hw - 0.01, sy, front_z + 0.0045, 0.007, 0.007, 0.002, (0.85, 0.88, 0.92))
 
         # 6. Console Port
         con_port = dev.ports.get("con0")
         if con_port:
             cx, cy, cz = dev.get_port_local_pos(con_port.name, con_port.port_index)
-            self._draw_box(cx, cy, cz, 0.024, 0.018, 0.003, (0.2, 0.65, 0.95))
-            self._draw_box(cx, cy, cz + 0.002, 0.018, 0.014, 0.002, (0.05, 0.08, 0.12))
+            self._draw_box(cx, cy, cz, 0.024, 0.018, 0.002, (0.2, 0.65, 0.95))
+            self._draw_box(cx, cy, cz + 0.0012, 0.018, 0.014, 0.0016, (0.05, 0.08, 0.12))
+            self._draw_box(cx, cy + 0.003, cz + 0.0022, 0.011, 0.003, 0.0012, (0.90, 0.78, 0.18))
 
         # 7. Gigabit Ports & SFP Fiber Cages on bottom tier
         port_list = [p for p in dev.ports.values() if p.port_type != "CONSOLE"]
@@ -1650,13 +1680,15 @@ class Renderer3D:
             px, py, pz = dev.get_port_local_pos(port.name, port.port_index)
 
             # Port frame & socket
-            self._draw_box(px, py, pz, 0.026, 0.022, 0.004, (0.50, 0.53, 0.56))
-            self._draw_box(px, py, pz + 0.002, 0.020, 0.016, 0.003, (0.04, 0.04, 0.05))
+            self._draw_box(px, py, pz, 0.026, 0.022, 0.002, (0.55, 0.58, 0.62))
+            self._draw_box(px, py, pz + 0.0012, 0.020, 0.016, 0.0016, (0.04, 0.04, 0.05))
+            # Gold pin contacts inside socket
+            self._draw_box(px, py + 0.003, pz + 0.0022, 0.012, 0.003, 0.0012, (0.92, 0.80, 0.18))
 
             # Status LED
             led = port.get_led_state(now)
             led_c = (0.1, 0.98, 0.2) if led in (LEDState.GREEN, LEDState.BLINK_GREEN) else ((1.0, 0.65, 0.05) if led == LEDState.AMBER else (0.08, 0.12, 0.08))
-            self._draw_box(px, py + 0.016, pz + 0.003, 0.007, 0.007, 0.003, led_c)
+            self._draw_box(px, py + 0.016, pz + 0.002, 0.007, 0.007, 0.002, led_c)
 
     def _render_server(self, dev, now):
         """High-detail Enterprise 2U Server with 8 Hot-Swap Drive Bays & Status LCD."""
@@ -1673,38 +1705,34 @@ class Renderer3D:
             by = 0.018 if bay < 4 else -0.022
 
             # Drive caddy bezel
-            self._draw_box(bx, by, front_z + 0.002, 0.058, 0.032, 0.004, (0.15, 0.16, 0.19))
+            self._draw_box(bx, by, front_z + 0.0025, 0.058, 0.032, 0.003, (0.15, 0.16, 0.19))
             # Drive release latch lever
-            self._draw_box(bx - 0.018, by, front_z + 0.004, 0.012, 0.024, 0.002, (0.35, 0.38, 0.42))
+            self._draw_box(bx - 0.018, by, front_z + 0.0045, 0.012, 0.024, 0.002, (0.38, 0.42, 0.46))
 
-            # Drive Activity LED (subtle green flicker simulating disk read/write)
-            drive_blink = (int(now * 8 + bay * 3) % 5 == 0)
-            drive_c = (0.15, 0.98, 0.25) if drive_blink else (0.05, 0.15, 0.05)
-            self._draw_box(bx + 0.022, by + 0.008, front_z + 0.005, 0.005, 0.005, 0.002, drive_c)
+            # Drive Activity LED (unlit lens in static display list, dynamic flicker in front pass)
+            self._draw_box(bx + 0.022, by + 0.008, front_z + 0.0045, 0.005, 0.005, 0.002, (0.04, 0.12, 0.04))
 
         # 3. Pull-Out Asset Tag (Blue enterprise ID tag) on top right
-        self._draw_box(0.14, 0.024, front_z + 0.004, 0.045, 0.014, 0.003, (0.0, 0.45, 0.85))
+        self._draw_box(0.14, 0.024, front_z + 0.003, 0.045, 0.014, 0.002, (0.0, 0.45, 0.85))
 
         # 4. Diagnostic Amber/Blue LCD Status Display
-        self._draw_box(0.14, -0.002, front_z + 0.003, 0.060, 0.022, 0.002, (0.05, 0.22, 0.35))
+        self._draw_box(0.14, -0.002, front_z + 0.0025, 0.060, 0.022, 0.002, (0.05, 0.22, 0.35))
 
-        # 5. Round Illuminated Power Button
-        self._draw_box(0.19, 0.024, front_z + 0.004, 0.016, 0.016, 0.003, (0.1, 0.95, 0.3))
+        # 5. Round Illuminated Power Button (base bezel; dynamic glow rendered per-frame)
+        self._draw_box(0.19, 0.024, front_z + 0.0035, 0.016, 0.016, 0.002, (0.08, 0.15, 0.10))
 
         # 6. Silver Quick-Release Rack-Mount Ears
-        self._draw_box(-hw + 0.01, 0.0, front_z + 0.001, 0.02, dev.height, 0.005, (0.50, 0.54, 0.58))
-        self._draw_box(hw - 0.01, 0.0, front_z + 0.001, 0.02, dev.height, 0.005, (0.50, 0.54, 0.58))
+        self._draw_box(-hw + 0.01, 0.0, front_z + 0.002, 0.02, dev.height, 0.005, (0.52, 0.56, 0.60))
+        self._draw_box(hw - 0.01, 0.0, front_z + 0.002, 0.02, dev.height, 0.005, (0.52, 0.56, 0.60))
 
         # 7. Management / Host Network Port eth0
         port = dev.ports.get("eth0")
         if port:
             px, py, pz = dev.get_port_local_pos(port.name, port.port_index)
-            self._draw_box(px, py, pz, 0.026, 0.020, 0.004, (0.45, 0.48, 0.52))
-            self._draw_box(px, py, pz + 0.002, 0.020, 0.015, 0.003, (0.04, 0.04, 0.05))
-
-            led = port.get_led_state(now)
-            led_c = (0.1, 0.98, 0.2) if led in (LEDState.GREEN, LEDState.BLINK_GREEN) else (0.08, 0.12, 0.08)
-            self._draw_box(px, py + 0.014, pz + 0.003, 0.006, 0.006, 0.002, led_c)
+            self._draw_box(px, py, pz, 0.026, 0.020, 0.002, (0.52, 0.55, 0.58))
+            self._draw_box(px, py, pz + 0.0012, 0.020, 0.015, 0.0016, (0.04, 0.04, 0.05))
+            self._draw_box(px, py + 0.003, pz + 0.0022, 0.012, 0.003, 0.0012, (0.92, 0.80, 0.18))
+            # eth0 dynamic status LEDs rendered per-frame in _render_device_dynamic_front
 
     def _render_firewall(self, dev, now):
         """High-detail Cisco ASA 5500 Series 1U Enterprise Firewall."""
@@ -1715,13 +1743,11 @@ class Renderer3D:
         # 1. Front Faceplate (Cisco ASA Crimson Red Metallic Bezel)
         self._draw_box(0.0, 0.0, front_z, dev.width, dev.height, 0.006, (0.58, 0.12, 0.16))
 
-        # 2. Central Dark Obsidian Recessed Tray
-        self._draw_box(0.02, 0.0, front_z + 0.001, dev.width - 0.12, dev.height - 0.010, 0.003, (0.12, 0.13, 0.16))
+        # 2. Cisco ASA Metallic Logo / Crimson Model Badge on upper left
+        self._draw_box(-0.16, hh - 0.008, front_z + 0.0025, 0.07, 0.010, 0.002, (0.82, 0.14, 0.18))
+        self._draw_box(-0.16, hh - 0.008, front_z + 0.0035, 0.05, 0.004, 0.001, (0.95, 0.95, 0.98))
 
-        # 3. Cisco ASA Metallic Logo / Crimson Model Badge on upper left
-        self._draw_box(-0.16, hh - 0.008, front_z + 0.003, 0.07, 0.010, 0.002, (0.82, 0.14, 0.18))
-
-        # 4. Security Status LED Cluster (PWR, STATUS, ACTIVE, VPN) on the left
+        # 3. Security Status LED Cluster (PWR, STATUS, ACTIVE, VPN) on the left
         sec_leds = [
             (-0.19, 0.008, (0.1, 0.98, 0.2)),    # PWR
             (-0.178, 0.008, (0.1, 0.98, 0.2)),   # STATUS
@@ -1731,63 +1757,67 @@ class Renderer3D:
         for lx, ly, col in sec_leds:
             self._draw_box(lx, ly, front_z + 0.003, 0.005, 0.005, 0.002, col)
 
-        # 5. Console Port (Baby Blue) & Management Port (Charcoal)
+        # 4. Console Port (Baby Blue) & Management Port (Charcoal)
         con_port = dev.ports.get("con0")
         if con_port:
             cx, cy, cz = dev.get_port_local_pos(con_port.name, con_port.port_index)
-            self._draw_box(cx, cy, cz, 0.022, 0.017, 0.003, (0.2, 0.65, 0.95))
-            self._draw_box(cx, cy, cz + 0.002, 0.017, 0.013, 0.002, (0.05, 0.08, 0.12))
+            self._draw_box(cx, cy, cz, 0.024, 0.018, 0.002, (0.2, 0.65, 0.95))
+            self._draw_box(cx, cy, cz + 0.0012, 0.018, 0.014, 0.0016, (0.05, 0.08, 0.12))
+            self._draw_box(cx, cy + 0.003, cz + 0.0022, 0.011, 0.003, 0.0012, (0.90, 0.78, 0.18))
 
         m_port = dev.ports.get("m0/0")
         if m_port:
             mx, my, mz = dev.get_port_local_pos(m_port.name, m_port.port_index)
-            self._draw_box(mx, my, mz, 0.022, 0.017, 0.003, (0.42, 0.45, 0.48))
-            self._draw_box(mx, my, mz + 0.002, 0.017, 0.013, 0.002, (0.05, 0.08, 0.12))
+            self._draw_box(mx, my, mz, 0.024, 0.018, 0.002, (0.45, 0.48, 0.52))
+            self._draw_box(mx, my, mz + 0.0012, 0.018, 0.014, 0.0016, (0.05, 0.08, 0.12))
+            self._draw_box(mx, my + 0.003, mz + 0.0022, 0.011, 0.003, 0.0012, (0.90, 0.78, 0.18))
             led = m_port.get_led_state(now)
             m_col = (0.1, 0.98, 0.2) if led in (LEDState.GREEN, LEDState.BLINK_GREEN) else (0.08, 0.12, 0.08)
-            self._draw_box(mx, my + 0.013, mz + 0.003, 0.005, 0.005, 0.002, m_col)
+            self._draw_box(mx, my + 0.013, mz + 0.0025, 0.005, 0.005, 0.002, m_col)
 
-        # 6. Right Side Diamond Intake Cooling Vent Grille
-        self._draw_box(0.20, 0.0, front_z + 0.002, 0.05, dev.height - 0.016, 0.002, (0.08, 0.09, 0.11))
+        # 5. Right Side Intake Cooling Vent Grille
+        self._draw_box(0.185, 0.0, front_z + 0.0035, 0.055, dev.height - 0.016, 0.002, (0.12, 0.13, 0.16))
+        for vs in range(5):
+            self._draw_box(0.165 + vs * 0.010, 0.0, front_z + 0.0045, 0.003, dev.height - 0.020, 0.0015, (0.28, 0.30, 0.35))
 
-        # 7. Heavy-Duty Metal Rack Mount Ears & Screws
-        self._draw_box(-hw + 0.01, 0.0, front_z + 0.001, 0.02, dev.height, 0.005, (0.45, 0.48, 0.52))
-        self._draw_box(hw - 0.01, 0.0, front_z + 0.001, 0.02, dev.height, 0.005, (0.45, 0.48, 0.52))
-        self._draw_box(-hw + 0.01, 0.0, front_z + 0.004, 0.008, 0.008, 0.002, (0.85, 0.88, 0.92))
-        self._draw_box(hw - 0.01, 0.0, front_z + 0.004, 0.008, 0.008, 0.002, (0.85, 0.88, 0.92))
+        # 6. Heavy-Duty Metal Rack Mount Ears & Screws
+        self._draw_box(-hw + 0.01, 0.0, front_z + 0.002, 0.02, dev.height, 0.005, (0.48, 0.52, 0.56))
+        self._draw_box(hw - 0.01, 0.0, front_z + 0.002, 0.02, dev.height, 0.005, (0.48, 0.52, 0.56))
+        self._draw_box(-hw + 0.01, 0.0, front_z + 0.0045, 0.008, 0.008, 0.002, (0.85, 0.88, 0.92))
+        self._draw_box(hw - 0.01, 0.0, front_z + 0.0045, 0.008, 0.008, 0.002, (0.85, 0.88, 0.92))
 
-        # 8. Data Ports (g0/0 to g0/5) with Shielding, Pins and Dual Status LEDs
+        # 7. Data Ports (g0/0 to g0/5) with Shielding, Solid Gold Pins and Status LEDs
         data_ports = [p for p in dev.ports.values() if p.port_type != "CONSOLE" and not p.name.startswith("m")]
         for idx, port in enumerate(data_ports):
             px, py, pz = dev.get_port_local_pos(port.name, port.port_index)
 
-            # Metallic Shielding
-            self._draw_box(px, py, pz, 0.025, 0.020, 0.004, (0.52, 0.55, 0.58))
-            # Socket Cavity
-            self._draw_box(px, py, pz + 0.002, 0.020, 0.015, 0.003, (0.03, 0.03, 0.04))
-            # Gold Pins
-            self._draw_box(px, py + 0.003, pz + 0.003, 0.012, 0.003, 0.001, (0.85, 0.72, 0.15))
+            # Metallic Shielding Frame (front at pz + 0.001)
+            self._draw_box(px, py, pz, 0.026, 0.020, 0.002, (0.55, 0.58, 0.62))
+            # Dark Recessed Socket Cavity (front at pz + 0.002)
+            self._draw_box(px, py, pz + 0.0012, 0.020, 0.015, 0.0016, (0.03, 0.03, 0.04))
+            # Solid Gold Contact Pins (front at pz + 0.0028, 0.8mm ahead of cavity, 100% solid yellow, no black noise)
+            self._draw_box(px, py + 0.003, pz + 0.0022, 0.012, 0.003, 0.0012, (0.92, 0.80, 0.18))
 
             # Zone color accent indicator bar above port (Outside = red, Inside = green, DMZ = orange)
             zone = getattr(dev, "nameif", {}).get(port.name, "")
             if zone == "outside":
-                z_col = (0.85, 0.18, 0.18)
+                z_col = (0.92, 0.20, 0.20)
             elif zone == "inside":
-                z_col = (0.15, 0.75, 0.25)
+                z_col = (0.15, 0.85, 0.28)
             elif zone == "dmz":
-                z_col = (0.95, 0.55, 0.10)
+                z_col = (0.98, 0.60, 0.10)
             else:
-                z_col = (0.35, 0.40, 0.48)
+                z_col = (0.42, 0.46, 0.54)
             self._draw_box(px, py + 0.014, pz + 0.002, 0.022, 0.003, 0.002, z_col)
 
             # Dual LEDs
             led = port.get_led_state(now)
             link_c = (0.1, 0.98, 0.2) if led == LEDState.GREEN else ((0.4, 1.0, 0.5) if led == LEDState.BLINK_GREEN else ((1.0, 0.65, 0.05) if led == LEDState.AMBER else (0.08, 0.12, 0.08)))
-            self._draw_box(px - 0.005, py - 0.014, pz + 0.003, 0.005, 0.005, 0.002, link_c)
+            self._draw_box(px - 0.005, py - 0.014, pz + 0.0025, 0.005, 0.005, 0.002, link_c)
 
             act_blink = (led in (LEDState.GREEN, LEDState.BLINK_GREEN)) and (int(now * 14 + idx) % 2 == 0)
             act_c = (0.2, 0.95, 0.3) if act_blink else (0.06, 0.10, 0.06)
-            self._draw_box(px + 0.005, py - 0.014, pz + 0.003, 0.005, 0.005, 0.002, act_c)
+            self._draw_box(px + 0.005, py - 0.014, pz + 0.0025, 0.005, 0.005, 0.002, act_c)
 
     def _render_isp_gateway(self, dev, now):
         """
@@ -1804,102 +1834,102 @@ class Renderer3D:
 
         # 1. Front Faceplate (Two-tone: Charcoal Chassis with Titanium Pearl Faceplate)
         self._draw_box(0.0, 0.0, front_z, dev.width, dev.height, 0.006, (0.20, 0.22, 0.26))
-        # Titanium Pearl main instrument fascia
-        self._draw_box(0.0, -0.002, front_z + 0.001, dev.width - 0.045, dev.height - 0.008, 0.003, (0.28, 0.31, 0.36))
+        # Titanium Pearl main instrument fascia (crisp 1mm ahead of charcoal bezel)
+        self._draw_box(0.0, -0.002, front_z + 0.0025, dev.width - 0.045, dev.height - 0.008, 0.002, (0.32, 0.35, 0.40))
 
         # 2. Telecom Warning Yellow & High-Tech Cyan Accent Stripes across top edge
-        self._draw_box(0.0, hh - 0.003, front_z + 0.002, dev.width - 0.04, 0.003, 0.002, (0.95, 0.78, 0.10))
-        self._draw_box(0.0, hh - 0.006, front_z + 0.002, dev.width - 0.04, 0.002, 0.002, (0.0, 0.75, 0.95))
+        self._draw_box(0.0, hh - 0.003, front_z + 0.0035, dev.width - 0.04, 0.003, 0.002, (0.95, 0.78, 0.10))
+        self._draw_box(0.0, hh - 0.006, front_z + 0.0035, dev.width - 0.04, 0.002, 0.002, (0.0, 0.75, 0.95))
 
         # 3. Heavy-Duty Telecom Rack Mount Ears with Captive Knurled Thumbscrews
-        self._draw_box(-hw + 0.01, 0.0, front_z + 0.001, 0.02, dev.height, 0.005, (0.42, 0.45, 0.50))
-        self._draw_box(hw - 0.01, 0.0, front_z + 0.001, 0.02, dev.height, 0.005, (0.42, 0.45, 0.50))
+        self._draw_box(-hw + 0.01, 0.0, front_z + 0.002, 0.02, dev.height, 0.005, (0.45, 0.48, 0.54))
+        self._draw_box(hw - 0.01, 0.0, front_z + 0.002, 0.02, dev.height, 0.005, (0.45, 0.48, 0.54))
         # Stainless hex mounting screws (top and bottom of each ear)
         for ear_x in [-hw + 0.01, hw - 0.01]:
             for sy in [-0.012, 0.012]:
-                self._draw_box(ear_x, sy, front_z + 0.004, 0.006, 0.006, 0.002, (0.85, 0.88, 0.92))
+                self._draw_box(ear_x, sy, front_z + 0.0045, 0.006, 0.006, 0.002, (0.85, 0.88, 0.92))
             # Captive thumbscrew in center
-            self._draw_box(ear_x, 0.0, front_z + 0.005, 0.009, 0.009, 0.004, (0.65, 0.68, 0.72))
+            self._draw_box(ear_x, 0.0, front_z + 0.0055, 0.009, 0.009, 0.004, (0.65, 0.68, 0.72))
 
         # 4. Dual Brass Telecom Grounding Studs (Chassis Earth Safety)
         for gy in [-0.008, 0.008]:
-            self._draw_box(-0.21, gy, front_z + 0.003, 0.005, 0.005, 0.003, (0.78, 0.65, 0.20))
+            self._draw_box(-0.21, gy, front_z + 0.004, 0.005, 0.005, 0.003, (0.78, 0.65, 0.20))
         # Green ground symbol badge
-        self._draw_box(-0.21, 0.0, front_z + 0.002, 0.004, 0.006, 0.001, (0.1, 0.85, 0.25))
+        self._draw_box(-0.21, 0.0, front_z + 0.0035, 0.004, 0.006, 0.001, (0.1, 0.85, 0.25))
 
         # 5. Telecom Status LED Cluster (PWR, CARRIER, SYNC, ALARM, TEST)
         eth_port = dev.ports.get("eth0")
         is_carrier_up = (eth_port and eth_port.is_link_up) or dev.is_powered
 
         # Status LED Bank Base Plate
-        self._draw_box(-0.165, 0.0, front_z + 0.002, 0.075, dev.height - 0.014, 0.002, (0.12, 0.13, 0.16))
+        self._draw_box(-0.165, 0.0, front_z + 0.003, 0.075, dev.height - 0.014, 0.002, (0.12, 0.13, 0.16))
 
         # PWR LED (Steady Green)
-        self._draw_box(-0.192, 0.006, front_z + 0.0035, 0.005, 0.005, 0.002, (0.1, 0.98, 0.2) if dev.is_powered else (0.08, 0.12, 0.08))
+        self._draw_box(-0.192, 0.006, front_z + 0.0042, 0.005, 0.005, 0.002, (0.1, 0.98, 0.2) if dev.is_powered else (0.08, 0.12, 0.08))
 
         # CARRIER LED (High-Intensity Emerald Green - Link Sync)
         carrier_pulse = 0.85 + 0.15 * math.sin(now * 4.0)
         carrier_col = (0.0, 1.0 * carrier_pulse, 0.4 * carrier_pulse) if is_carrier_up else (0.08, 0.12, 0.08)
-        self._draw_box(-0.178, 0.006, front_z + 0.0035, 0.005, 0.005, 0.002, carrier_col)
+        self._draw_box(-0.178, 0.006, front_z + 0.0042, 0.005, 0.005, 0.002, carrier_col)
 
         # SYNC / BITS LED (Telecom Clock Sync - High-precision 2Hz pulse)
         sync_blink = int(now * 4) % 2 == 0
         sync_col = (0.15, 0.85, 1.0) if sync_blink else (0.05, 0.25, 0.35)
-        self._draw_box(-0.164, 0.006, front_z + 0.0035, 0.005, 0.005, 0.002, sync_col)
+        self._draw_box(-0.164, 0.006, front_z + 0.0042, 0.005, 0.005, 0.002, sync_col)
 
         # ALARM LED (Bi-color: Steady Dim Green when normal, Amber/Red if issue)
         alarm_col = (0.08, 0.50, 0.15) if is_carrier_up else (0.95, 0.20, 0.10)
-        self._draw_box(-0.192, -0.006, front_z + 0.0035, 0.005, 0.005, 0.002, alarm_col)
+        self._draw_box(-0.192, -0.006, front_z + 0.0042, 0.005, 0.005, 0.002, alarm_col)
 
         # TEST / LOOP LED (Loopback Diagnostic Indicator)
-        self._draw_box(-0.178, -0.006, front_z + 0.0035, 0.005, 0.005, 0.002, (0.08, 0.08, 0.10))
+        self._draw_box(-0.178, -0.006, front_z + 0.0042, 0.005, 0.005, 0.002, (0.08, 0.08, 0.10))
 
         # 6. Class 1 Laser Product Warning Chevron Badge
-        self._draw_box(-0.145, 0.0, front_z + 0.003, 0.016, 0.016, 0.002, (0.95, 0.80, 0.10))
-        self._draw_box(-0.145, 0.0, front_z + 0.004, 0.010, 0.010, 0.001, (0.10, 0.10, 0.10))
-        self._draw_box(-0.145, 0.0, front_z + 0.0045, 0.004, 0.004, 0.001, (0.95, 0.80, 0.10))
+        self._draw_box(-0.145, 0.0, front_z + 0.0035, 0.016, 0.016, 0.002, (0.95, 0.80, 0.10))
+        self._draw_box(-0.145, 0.0, front_z + 0.0045, 0.010, 0.010, 0.001, (0.10, 0.10, 0.10))
+        self._draw_box(-0.145, 0.0, front_z + 0.0050, 0.004, 0.004, 0.001, (0.95, 0.80, 0.10))
 
         # 7. Diagnostic Carrier Backlit LCD Display (Cyan/Sapphire Matrix)
         # Bezel frame
-        self._draw_box(-0.065, 0.0, front_z + 0.0025, 0.115, 0.028, 0.002, (0.10, 0.11, 0.13))
+        self._draw_box(-0.065, 0.0, front_z + 0.003, 0.115, 0.028, 0.002, (0.10, 0.11, 0.13))
         # Inset display glass
-        self._draw_box(-0.065, 0.0, front_z + 0.0035, 0.105, 0.022, 0.001, (0.02, 0.14, 0.22))
+        self._draw_box(-0.065, 0.0, front_z + 0.004, 0.105, 0.022, 0.001, (0.02, 0.14, 0.22))
 
         # Backlit Screen glow & dynamic scanning line
         lcd_glow = 0.88 + 0.12 * math.sin(now * 2.5)
         # Top line: Carrier WAN Sync status dots/segments
         for seg in range(6):
             sx = -0.105 + seg * 0.016
-            self._draw_box(sx, 0.005, front_z + 0.004, 0.012, 0.004, 0.001, (0.0, 0.85 * lcd_glow, 0.95 * lcd_glow))
+            self._draw_box(sx, 0.005, front_z + 0.0045, 0.012, 0.004, 0.001, (0.0, 0.85 * lcd_glow, 0.95 * lcd_glow))
         # Bottom line: IP / Carrier Uplink telemetry segments
         for seg in range(5):
             sx = -0.100 + seg * 0.018
-            self._draw_box(sx, -0.005, front_z + 0.004, 0.014, 0.004, 0.001, (0.15, 0.70 * lcd_glow, 0.90 * lcd_glow))
+            self._draw_box(sx, -0.005, front_z + 0.0045, 0.014, 0.004, 0.001, (0.15, 0.70 * lcd_glow, 0.90 * lcd_glow))
 
         # 8. Customer Handoff RJ45 10GbE Port (eth0)
         # Matches exact coordinate from dev.get_port_local_pos("eth0") -> (0.04, 0.0, front_z + 0.004)
         px, py, pz = dev.get_port_local_pos("eth0", 0)
 
         # Port decorative bezel plate with silkscreen trim
-        self._draw_box(px, py, front_z + 0.002, 0.038, dev.height - 0.012, 0.002, (0.16, 0.18, 0.22))
+        self._draw_box(px, py, front_z + 0.003, 0.038, dev.height - 0.012, 0.002, (0.16, 0.18, 0.22))
         # Cyan outline trim around handoff port
-        self._draw_box(px, py + 0.013, front_z + 0.003, 0.032, 0.002, 0.001, (0.0, 0.75, 0.95))
+        self._draw_box(px, py + 0.013, front_z + 0.004, 0.032, 0.002, 0.001, (0.0, 0.75, 0.95))
 
         # Heavy-duty shielded RJ45 metal jack frame
-        self._draw_box(px, py, pz, 0.026, 0.020, 0.004, (0.58, 0.62, 0.66))
+        self._draw_box(px, py, pz, 0.026, 0.020, 0.002, (0.58, 0.62, 0.66))
         # Dark recessed cavity
-        self._draw_box(px, py, pz + 0.002, 0.020, 0.015, 0.003, (0.03, 0.03, 0.04))
-        # Internal gold contact pins
-        self._draw_box(px, py + 0.003, pz + 0.003, 0.012, 0.003, 0.001, (0.90, 0.78, 0.18))
+        self._draw_box(px, py, pz + 0.0012, 0.020, 0.015, 0.0016, (0.03, 0.03, 0.04))
+        # Internal solid gold contact pins
+        self._draw_box(px, py + 0.003, pz + 0.0022, 0.012, 0.003, 0.0012, (0.92, 0.80, 0.18))
 
         # Dual Status LEDs on RJ45 Handoff:
         led = eth_port.get_led_state(now) if eth_port else LEDState.OFF
         link_col = (0.1, 0.98, 0.2) if led in (LEDState.GREEN, LEDState.BLINK_GREEN) else ((1.0, 0.65, 0.05) if led == LEDState.AMBER else (0.08, 0.12, 0.08))
-        self._draw_box(px - 0.006, py + 0.015, pz + 0.003, 0.005, 0.005, 0.002, link_col)
+        self._draw_box(px - 0.006, py + 0.015, pz + 0.002, 0.005, 0.005, 0.002, link_col)
 
         act_blink = (led in (LEDState.GREEN, LEDState.BLINK_GREEN)) and (int(now * 16) % 2 == 0)
         act_col = (0.2, 0.95, 0.3) if act_blink else (0.06, 0.10, 0.06)
-        self._draw_box(px + 0.006, py + 0.015, pz + 0.003, 0.005, 0.005, 0.002, act_col)
+        self._draw_box(px + 0.006, py + 0.015, pz + 0.002, 0.005, 0.005, 0.002, act_col)
 
         # 9. Dual Optical SFP+ WAN Uplink Transceiver Cages (SFP0 / SFP1)
         # SFP Cages Base housing
@@ -1941,11 +1971,11 @@ class Renderer3D:
                 self._draw_box(sx, -0.012, front_z + 0.018, 0.008, 0.006, 0.003, fiber_col)
 
         # 10. Right Honeycomb Exhaust Ventilation Grille
-        self._draw_box(0.185, 0.0, front_z + 0.002, 0.055, dev.height - 0.014, 0.002, (0.07, 0.08, 0.10))
+        self._draw_box(0.185, 0.0, front_z + 0.0035, 0.055, dev.height - 0.014, 0.002, (0.07, 0.08, 0.10))
         # Slotted airflow vanes
         for v in range(5):
             vy = -0.010 + v * 0.005
-            self._draw_box(0.185, vy, front_z + 0.003, 0.048, 0.002, 0.001, (0.30, 0.34, 0.40))
+            self._draw_box(0.185, vy, front_z + 0.0045, 0.048, 0.002, 0.001, (0.30, 0.34, 0.40))
 
     def _render_generic_device(self, dev, now):
         """Fallback renderer for other appliances e.g. Laptop."""

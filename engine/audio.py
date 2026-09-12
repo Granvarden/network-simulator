@@ -157,3 +157,6 @@ class SoundManager:
             self.chime_success.play()
         except Exception:
             pass
+
+    def play_error(self):
+        self.play_ping(success=False)

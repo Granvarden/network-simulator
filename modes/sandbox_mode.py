@@ -119,6 +119,23 @@ class SandboxMode(BaseMode):
                 return True, dev
         return False, None
 
+    def find_next_free_slot(self, preferred_rack_id=None, needed_u=1):
+        """Finds the first available non-overlapping U-slot across racks (Rack 1, 2, or 3)."""
+        racks_to_check = [preferred_rack_id] if preferred_rack_id in (1, 2, 3) else [1, 2, 3]
+        for r_id in racks_to_check:
+            for slot in range(6, 43 - needed_u, 2):
+                occupied, _ = self.is_slot_occupied(r_id, slot, needed_u)
+                if not occupied:
+                    return r_id, slot
+        for r_id in (1, 2, 3):
+            if r_id in racks_to_check:
+                continue
+            for slot in range(6, 43 - needed_u, 2):
+                occupied, _ = self.is_slot_occupied(r_id, slot, needed_u)
+                if not occupied:
+                    return r_id, slot
+        return 1, 12
+
     def add_device(self, device_type, rack_id, u_slot, hostname=None, num_ports=None):
         """Installs a new device into the rack with collision detection."""
         rack_id = int(rack_id)
@@ -149,12 +166,24 @@ class SandboxMode(BaseMode):
             dev_id = f"fw_{cnt}"
             h_name = hostname.strip() if hostname else f"Firewall-ASA-0{cnt}"
             dev = Firewall(dev_id, hostname=h_name, rack_id=rack_id, u_slot=u_slot, num_ports=num_ports or 6)
+        elif device_type == "laptop":
+            dev_id = f"lap_{cnt}"
+            h_name = hostname.strip() if hostname else f"Laptop-0{cnt}"
+            dev = Host(dev_id, hostname=h_name, device_type="laptop", rack_id=0, u_slot=0, os_type="windows")
+            dev.pos_x, dev.pos_y, dev.pos_z = -3.55, 0.77, 0.50 + (cnt % 4) * 0.45
+        elif device_type == "pc":
+            dev_id = f"pc_{cnt}"
+            h_name = hostname.strip() if hostname else f"PC-0{cnt}"
+            dev = Host(dev_id, hostname=h_name, device_type="laptop", rack_id=0, u_slot=0, os_type="ubuntu")
+            dev.pos_x, dev.pos_y, dev.pos_z = -2.85, 0.77, 0.50 + (cnt % 4) * 0.45
         else:
             dev_id = f"srv_{cnt}"
             h_name = hostname.strip() if hostname else f"Server-0{cnt}"
             dev = Host(dev_id, hostname=h_name, device_type="server", rack_id=rack_id, u_slot=u_slot)
+            dev.pos_x, dev.pos_y, dev.pos_z = self.calculate_rack_position(rack_id, u_slot)
 
-        dev.pos_x, dev.pos_y, dev.pos_z = self.calculate_rack_position(rack_id, u_slot)
+        if device_type not in ("laptop", "pc"):
+            dev.pos_x, dev.pos_y, dev.pos_z = self.calculate_rack_position(rack_id, u_slot)
         self.devices.append(dev)
         self.status_msg = f"Installed {dev.hostname} at RACK-0{rack_id} (Slot {u_slot}U)!"
         self.sound.play_objective()
@@ -206,8 +235,9 @@ class SandboxMode(BaseMode):
             return self.status_msg
         return "Press [N] to Add/Remove devices. Aim + [Del] for Quick Delete. [F] to Cable. [E] for CLI."
 
-    def save_topology(self):
+    def save_topology(self, filepath=None):
         """Exports current device configurations and cable interconnections to JSON."""
+        target_path = filepath or self.save_file
         data = {
             "devices": [],
             "cables": []
@@ -249,6 +279,9 @@ class SandboxMode(BaseMode):
                 dev_data["os_type"] = getattr(dev, "os_type", "ubuntu")
                 dev_data["dns_server"] = getattr(dev, "dns_server", "8.8.8.8")
                 dev_data["pos"] = [dev.pos_x, dev.pos_y, dev.pos_z]
+            if hasattr(dev, "topo_x") and hasattr(dev, "topo_y"):
+                dev_data["topo_x"] = dev.topo_x
+                dev_data["topo_y"] = dev.topo_y
             data["devices"].append(dev_data)
 
         for cable in self.cables:
@@ -262,21 +295,24 @@ class SandboxMode(BaseMode):
                 })
 
         try:
-            with open(self.save_file, "w") as f:
+            with open(target_path, "w") as f:
                 json.dump(data, f, indent=2)
-            self.status_msg = f"Topology successfully saved to {self.save_file}!"
+            self.status_msg = f"Topology successfully saved to {target_path}!"
             self.sound.play_objective()
+            return True, self.status_msg
         except Exception as e:
             self.status_msg = f"Save failed: {e}"
+            return False, self.status_msg
 
-    def load_topology(self):
+    def load_topology(self, filepath=None):
         """Loads saved topology JSON file and restores all links and configs dynamically."""
-        if not os.path.exists(self.save_file):
+        target_path = filepath or self.save_file
+        if not os.path.exists(target_path):
             self.status_msg = "No saved topology file found."
-            return
+            return False, self.status_msg
 
         try:
-            with open(self.save_file, "r") as f:
+            with open(target_path, "r") as f:
                 data = json.load(f)
 
             # Disconnect all existing cables
@@ -325,6 +361,10 @@ class SandboxMode(BaseMode):
                     dev.pos_x, dev.pos_y, dev.pos_z = (-3.55 if getattr(dev, "os_type", "windows") == "windows" else -2.85), 0.77, 0.50
                 else:
                     dev.pos_x, dev.pos_y, dev.pos_z = self.calculate_rack_position(d_rack, d_slot)
+
+                if "topo_x" in dev_data and "topo_y" in dev_data:
+                    dev.topo_x = dev_data["topo_x"]
+                    dev.topo_y = dev_data["topo_y"]
 
                 # Restore port configurations
                 for p_name, p_info in dev_data.get("ports", {}).items():
@@ -377,5 +417,7 @@ class SandboxMode(BaseMode):
 
             self.status_msg = f"Loaded {len(self.devices)} devices & {len(self.cables)} cables successfully!"
             self.sound.play_objective()
+            return True, self.status_msg
         except Exception as e:
             self.status_msg = f"Load failed: {e}"
+            return False, self.status_msg

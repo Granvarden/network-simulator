@@ -125,6 +125,20 @@ class GameManager:
                     self.window.capture_mouse(False)
                 elif action == "EXIT":
                     self.is_running = False
+                elif action and action.startswith("OPEN_TERMINAL:"):
+                    dev_id = action.split(":", 1)[1]
+                    dev = next((d for d in self.mode.devices if d.id == dev_id), None)
+                    if dev:
+                        if dev.device_type == "laptop":
+                            self.laptop_gui = LaptopGUI(dev, self.window.width, self.window.height)
+                            self.laptop_gui.open()
+                        else:
+                            self.terminal = self._create_terminal(dev)
+                            self.terminal.open()
+                        self.menu.state = MenuState.IN_GAME
+                        self.window.capture_mouse(False)
+                        if hasattr(self.mode, "has_opened_terminal"):
+                            self.mode.has_opened_terminal = True
                 continue
 
             # 2. Laptop GUI Input routing

@@ -66,14 +66,16 @@ class Firewall(BaseDevice):
             return (-0.125, 0.0, front_z)
 
         data_ports = [p for p in self.ports.values() if p.port_type != "CONSOLE" and not p.name.startswith("m")]
+        num_data = max(1, len(data_ports))
         idx = 0
         for i, p in enumerate(data_ports):
             if p.name.lower() == clean or p.port_index == port_index:
                 idx = i
                 break
 
-        spacing = 0.038
-        start_x = -0.04
+        spacing = 0.034
+        center_x = 0.015
+        start_x = center_x - ((num_data - 1) * spacing) / 2.0
         lx = start_x + idx * spacing
         ly = 0.0
         return (lx, ly, front_z)

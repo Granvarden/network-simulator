@@ -125,7 +125,7 @@ class Switch(BaseDevice):
         """Returns exact local coordinates (x, y, z) on Switch front face."""
         front_z = (self.depth / 2.0) + 0.007
         if "con" in port_name.lower():
-            return (-0.12, -0.004, front_z)
+            return (-0.160, -0.004, front_z)
 
         # Data ports (g0/1 .. g0/8)
         data_ports = [p for p in self.ports.values() if p.port_type != "CONSOLE"]

@@ -8,6 +8,7 @@ from network.switch import Switch
 from network.router import Router
 from network.host import Host
 from network.firewall import Firewall
+from ui.topology_2d import Topology2D
 
 SHOWCASE_COMMANDS = {
     "router": {
@@ -592,6 +593,7 @@ class MenuState:
 class MenuManager:
     def __init__(self):
         self.state = MenuState.MAIN_MENU
+        self.topology_2d = Topology2D()
         self.font_logo = pygame.font.SysFont("Segoe UI", 38, bold=True) or pygame.font.Font(None, 44)
         self.font_title = pygame.font.SysFont("Segoe UI", 20, bold=True) or pygame.font.Font(None, 24)
         self.font_sub = pygame.font.SysFont("Segoe UI", 16) or pygame.font.Font(None, 20)
@@ -973,11 +975,10 @@ class MenuManager:
                     return "TO_MAIN_MENU"
 
         elif self.state == MenuState.TOPOLOGY_MAP:
-            if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1) or \
-               (event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_m, pygame.K_RETURN, pygame.K_SPACE)):
-                sound_mgr.play_key()
+            action = self.topology_2d.handle_input(event, sound_mgr, screen_w, screen_h, mode)
+            if action == "RESUME":
                 self.state = MenuState.IN_GAME
-                return "RESUME"
+            return action
 
         elif self.state == MenuState.HELP_GUIDE:
             return self._handle_help_guide_input(event, sound_mgr, screen_w, screen_h)
@@ -1259,7 +1260,7 @@ class MenuManager:
         elif self.state == MenuState.PAUSE:
             self._render_pause_menu(surface, screen_w, screen_h)
         elif self.state == MenuState.TOPOLOGY_MAP:
-            self._render_topology_map(surface, screen_w, screen_h, devices, cables)
+            self.topology_2d.render(surface, screen_w, screen_h, devices, cables, mode)
         elif self.state == MenuState.HELP_GUIDE:
             self._render_help_guide(surface, screen_w, screen_h)
         elif self.state == MenuState.DEVICE_MANAGER:

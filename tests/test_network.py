@@ -48,12 +48,12 @@ def test_packet_flow():
     engine = PacketEngine.get_instance()
 
     # Test 1: Ping gateway from Server
-    res1 = engine.simulate_ping(server, "192.168.1.1", count=5)
+    res1 = engine.simulate_ping(server, "192.168.1.1", count=5, simulate_arp=False)
     print(f"Ping Server -> Gateway: {res1.success_rate_cisco} (Loss: {res1.loss_percent}%)")
     assert res1.loss_percent == 0, "Ping to gateway should succeed 100%"
 
     # Test 2: Ping Host2 across router
-    res2 = engine.simulate_ping(server, "10.0.0.2", count=5)
+    res2 = engine.simulate_ping(server, "10.0.0.2", count=5, simulate_arp=False)
     print(f"Ping Server -> Host2 (cross-subnet): {res2.success_rate_cisco} (Loss: {res2.loss_percent}%)")
     assert res2.loss_percent == 0, "Ping across router should succeed 100%"
 
