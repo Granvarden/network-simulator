@@ -48,9 +48,9 @@ class GameManager:
         self.clock = pygame.time.Clock()
         self.is_running = True
 
-    def start_mode(self, mode_name):
+    def start_mode(self, mode_name, chapter=1):
         if mode_name == "TUTORIAL":
-            self.mode = TutorialMode()
+            self.mode = TutorialMode(chapter=chapter)
         elif mode_name == "CHALLENGE":
             self.mode = ChallengeMode()
         elif mode_name == "SANDBOX":
@@ -106,7 +106,15 @@ class GameManager:
             if self.menu.state != MenuState.IN_GAME:
                 action = self.menu.handle_input(event, self.sound, self.window.width, self.window.height, self.mode)
                 if action == "TUTORIAL":
-                    self.start_mode("TUTORIAL")
+                    self.menu.state = MenuState.TUTORIAL_SELECT
+                    self.sound.play_key()
+                elif action and (action == "START_TUTORIAL:1" or action.startswith("START_TUTORIAL:")):
+                    ch = 1
+                    try:
+                        ch = int(action.split(":")[1])
+                    except Exception:
+                        pass
+                    self.start_mode("TUTORIAL", chapter=ch)
                 elif action == "CHALLENGE":
                     self.start_mode("CHALLENGE")
                 elif action == "SANDBOX":
@@ -114,11 +122,14 @@ class GameManager:
                 elif action == "RESUME":
                     self.menu.state = MenuState.IN_GAME
                     self.window.capture_mouse(True)
+                    if hasattr(self.mode, "on_topology_event"):
+                        self.mode.on_topology_event("close")
                 elif action == "RESTART" and self.mode:
                     self.mode.setup()
                     self.menu.state = MenuState.IN_GAME
                     self.window.capture_mouse(True)
                 elif action == "TO_MAIN_MENU":
+                    self.menu.state = MenuState.MAIN_MENU
                     self.terminal = None
                     self.laptop_gui = None
                     self.sound.stop_ambient()
@@ -208,6 +219,8 @@ class GameManager:
                 elif event.key == pygame.K_m:
                     self.menu.state = MenuState.TOPOLOGY_MAP
                     self.window.capture_mouse(False)
+                    if hasattr(self.mode, "on_topology_event"):
+                        self.mode.on_topology_event("open")
 
                 # Open Controls & CLI Cheatsheet [H] / [F1]
                 elif event.key in (pygame.K_h, pygame.K_F1):
@@ -246,16 +259,18 @@ class GameManager:
                         self.held_cable_port = None
                         self.sound.play_key()
 
-                # Sandbox Controls: Save [K] / Load [L] / Device Manager [N] / Quick Delete [Del]
-                elif isinstance(self.mode, SandboxMode):
-                    if event.key == pygame.K_k:
+                # Sandbox / Tutorial Controls: Save [K] / Load [L] / Device Manager [N] / Quick Delete [Del]
+                elif isinstance(self.mode, SandboxMode) or hasattr(self.mode, "add_device"):
+                    if isinstance(self.mode, SandboxMode) and event.key == pygame.K_k:
                         self.mode.save_topology()
-                    elif event.key == pygame.K_l:
+                    elif isinstance(self.mode, SandboxMode) and event.key == pygame.K_l:
                         self.mode.load_topology()
                     elif event.key == pygame.K_n:
                         self.menu.state = MenuState.DEVICE_MANAGER
                         self.window.capture_mouse(False)
-                    elif event.key in (pygame.K_DELETE, pygame.K_BACKSPACE):
+                        if hasattr(self.mode, "has_opened_rack_manager"):
+                            self.mode.has_opened_rack_manager = True
+                    elif isinstance(self.mode, SandboxMode) and event.key in (pygame.K_DELETE, pygame.K_BACKSPACE):
                         f_dev, f_port, _ = self.camera.raycast(self.mode.devices)
                         target_dev = f_port.device if f_port else f_dev
                         if target_dev:
@@ -309,6 +324,8 @@ class GameManager:
                 new_cable = Cable(self.held_cable_port, f_port, c_type)
                 self.mode.cables.append(new_cable)
                 self.sound.play_cable()
+                if hasattr(self.mode, "on_cable_connected"):
+                    self.mode.on_cable_connected(self.held_cable_port, f_port)
                 self.held_cable_port = None
             else:
                 # Cancel if clicking same port

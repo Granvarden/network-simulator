@@ -1,0 +1,29 @@
+{
+  "unlocked_chapters": [
+    "chapter_1",
+    "chapter_2",
+    "chapter_3",
+    "chapter_4",
+    "chapter_5",
+    "chapter_6",
+    "chapter_7",
+    "chapter_8",
+    "chapter_9"
+  ],
+  "completed_chapters": [
+    "chapter_1"
+  ],
+  "completed_missions": {
+    "chapter_1": {
+      "mission_1_1": true,
+      "mission_1_2": false,
+      "mission_1_3": false,
+      "mission_1_4": false
+    },
+    "chapter_2": {
+      "mission_1_1": true
+    }
+  },
+  "current_chapter": "chapter_1",
+  "current_mission": "mission_1_1"
+}

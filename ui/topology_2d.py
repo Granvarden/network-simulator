@@ -236,7 +236,7 @@ class Topology2D:
             self._draw_placement_ghost(surface)
 
         # 7. Top Header & Control Bar
-        self._draw_top_bar(surface, screen_w, screen_h, len(devices), len(cables), is_sandbox)
+        self._draw_top_bar(surface, screen_w, screen_h, len(devices), len(cables), is_sandbox, mode)
 
         # 8. Bottom Palette / Dock (Sandbox Mode only)
         if is_sandbox:
@@ -330,7 +330,7 @@ class Topology2D:
                 mid_x = (sx1 + sx2) / 2.0
                 mid_y = (sy1 + sy2) / 2.0
                 tag_txt = f"{cable.port_a.name} <-> {cable.port_b.name}"
-                ts = self.font_badge.render(tag_txt, True, (25, 45, 75))
+                ts = self.font_badge.render(tag_txt, True, (0, 0, 0))
                 tw, th = ts.get_width() + 12, ts.get_height() + 6
                 tag_rect = pygame.Rect(mid_x - tw / 2, mid_y - th / 2, tw, th)
 
@@ -427,7 +427,7 @@ class Topology2D:
             surface.blit(tag_s, (header_rect.right - tag_s.get_width() - 8, header_rect.y + (header_h - tag_s.get_height()) // 2))
 
             # 4. Hostname
-            hn_s = self.font_node_title.render(dev.hostname, True, (20, 35, 55))
+            hn_s = self.font_node_title.render(dev.hostname, True, (0, 0, 0))
             surface.blit(hn_s, (rect.x + 10, header_rect.bottom + 6))
 
             # 5. Subtitle / IP Information
@@ -442,7 +442,7 @@ class Topology2D:
             else:
                 sub_txt = f"IP: {ip_str}"
 
-            ip_s = self.font_node_sub.render(sub_txt, True, (90, 110, 135))
+            ip_s = self.font_node_sub.render(sub_txt, True, (0, 0, 0))
             surface.blit(ip_s, (rect.x + 10, header_rect.bottom + 26))
 
             # 6. Port Mini Status Row at bottom of card
@@ -470,10 +470,10 @@ class Topology2D:
 
         lbl = self.font_node_title.render(f"Place {self.placing_device_type.upper()}", True, (0, 102, 204))
         surface.blit(lbl, (rect.x + (gw - lbl.get_width()) // 2, rect.y + 14))
-        hint = self.font_node_sub.render("Click on canvas to mount", True, (60, 90, 130))
+        hint = self.font_node_sub.render("Click on canvas to mount", True, (0, 0, 0))
         surface.blit(hint, (rect.x + (gw - hint.get_width()) // 2, rect.y + 38))
 
-    def _draw_top_bar(self, surface, w, h, dev_count, cable_count, is_sandbox):
+    def _draw_top_bar(self, surface, w, h, dev_count, cable_count, is_sandbox, mode=None):
         bar_h = 56
         bar_rect = pygame.Rect(0, 0, w, bar_h)
 
@@ -497,7 +497,7 @@ class Topology2D:
         surface.blit(title, (t_x, 8))
 
         mode_desc = f"Total Devices: {dev_count}  |  Active Links: {cable_count}  |  Realtime 3D Rack Sync"
-        sub = self.font_sub.render(mode_desc, True, (85, 105, 135))
+        sub = self.font_sub.render(mode_desc, True, (0, 0, 0))
         surface.blit(sub, (t_x, 32))
 
         # 3. Action Buttons (Right)
@@ -518,6 +518,11 @@ class Topology2D:
             badge_bg = (235, 252, 242)
             badge_border = (16, 160, 80)
             badge_col = (10, 120, 50)
+        elif hasattr(mode, "chapter"):
+            badge_txt = f"Tutorial Chapter {getattr(mode, 'chapter', 1)}: Interactive Topology"
+            badge_bg = (235, 246, 255)
+            badge_border = (0, 140, 255)
+            badge_col = (0, 95, 200)
         else:
             badge_txt = "Mission / Tutorial (View-Only Mode)"
             badge_bg = (255, 248, 235)
@@ -556,7 +561,7 @@ class Topology2D:
             self.cached_btn_rects[f"cat_{cat_id}"] = btn_r
             is_active = (self.active_category == cat_id)
             bg = (0, 115, 230) if is_active else ((230, 240, 252) if btn_r.collidepoint(pygame.mouse.get_pos()) else (255, 255, 255))
-            txt_c = (255, 255, 255) if is_active else (25, 45, 75)
+            txt_c = (255, 255, 255) if is_active else (0, 0, 0)
             pygame.draw.rect(surface, bg, btn_r, border_radius=4)
             lbl = self.font_badge.render(cat_title, True, txt_c)
             surface.blit(lbl, (btn_r.x + 8, btn_r.y + 6))
@@ -600,10 +605,10 @@ class Topology2D:
             # Indicator dot
             pygame.draw.circle(surface, i_col, (i_rect.x + 16, i_rect.y + 18), 6)
             # Item title
-            t_s = self.font_btn.render(i_title, True, (20, 35, 55))
+            t_s = self.font_btn.render(i_title, True, (0, 0, 0))
             surface.blit(t_s, (i_rect.x + 28, i_rect.y + 10))
             # Subtitle
-            s_s = self.font_sub.render(i_sub, True, (90, 110, 135))
+            s_s = self.font_sub.render(i_sub, True, (0, 0, 0))
             surface.blit(s_s, (i_rect.x + 14, i_rect.y + 36))
             # Action hint
             act_txt = "Click to cable" if i_id.startswith("cable") else "+ Drag or click to place"
@@ -620,7 +625,7 @@ class Topology2D:
         self.cached_btn_rects["tool_select"] = sel_rect
         is_sel = (self.selected_tool == "select")
         sel_bg = (0, 115, 230) if is_sel else (255, 255, 255)
-        sel_txt_c = (255, 255, 255) if is_sel else (25, 45, 75)
+        sel_txt_c = (255, 255, 255) if is_sel else (0, 0, 0)
         pygame.draw.rect(surface, sel_bg, sel_rect, border_radius=4)
         sel_s = self.font_btn.render("Select / Pan [V]", True, sel_txt_c)
         surface.blit(sel_s, (sel_rect.x + (sel_rect.w - sel_s.get_width()) // 2, sel_rect.y + 7))
@@ -645,7 +650,7 @@ class Topology2D:
         pygame.draw.line(surface, (215, 225, 238), (0, dock_y), (w, dock_y), 1)
 
         info_txt = "[!] View-Only Mode: You can inspect ports and cabling, but cannot add, modify, or delete devices during missions."
-        lbl = self.font_btn.render(info_txt, True, (60, 85, 120))
+        lbl = self.font_btn.render(info_txt, True, (0, 0, 0))
         surface.blit(lbl, (w // 2 - lbl.get_width() // 2, dock_y + 18))
 
     # -------------------------------------------------------------------------
@@ -687,7 +692,7 @@ class Topology2D:
 
         # Subtitle
         sub_txt = f"Device: {dev.hostname} ({dev.device_type.upper()})"
-        sub_s = self.font_node_sub.render(sub_txt, True, (80, 105, 135))
+        sub_s = self.font_node_sub.render(sub_txt, True, (0, 0, 0))
         surface.blit(sub_s, (dx + 18, dy + 56))
 
         # Ports list
@@ -704,15 +709,15 @@ class Topology2D:
             if is_connected:
                 bg = (245, 247, 250)
                 border_c = (220, 228, 238)
-                name_c = (120, 135, 155)
+                name_c = (0, 0, 0)
                 peer = port.cable.get_peer_port(port)
                 peer_name = peer.device.hostname if peer else "Connected"
                 status_txt = f"Connected -> {peer_name}:{peer.name}"
-                status_c = (140, 150, 165)
+                status_c = (0, 0, 0)
             else:
                 bg = (235, 248, 255) if is_hover else (255, 255, 255)
                 border_c = (0, 120, 240) if is_hover else (195, 215, 238)
-                name_c = (15, 45, 80)
+                name_c = (0, 0, 0)
                 status_txt = "[Available] Ready to connect"
                 status_c = (16, 155, 75)
 
@@ -758,17 +763,17 @@ class Topology2D:
         # Content fields
         py = dy + 68
         # Hostname
-        surface.blit(self.font_btn.render("Hostname:", True, (20, 35, 60)), (dx + 20, py))
+        surface.blit(self.font_btn.render("Hostname:", True, (0, 0, 0)), (dx + 20, py))
         surface.blit(self.font_mono_bold.render(dev.hostname, True, (0, 102, 204)), (dx + 210, py))
         py += 32
 
         # Device Type
-        surface.blit(self.font_btn.render("Device Type:", True, (20, 35, 60)), (dx + 20, py))
-        surface.blit(self.font_node_title.render(dev.device_type.upper(), True, (25, 45, 75)), (dx + 210, py))
+        surface.blit(self.font_btn.render("Device Type:", True, (0, 0, 0)), (dx + 20, py))
+        surface.blit(self.font_node_title.render(dev.device_type.upper(), True, (0, 0, 0)), (dx + 210, py))
         py += 32
 
         # 3D Rack Location
-        surface.blit(self.font_btn.render("3D Datacenter Location:", True, (20, 35, 60)), (dx + 20, py))
+        surface.blit(self.font_btn.render("3D Datacenter Location:", True, (0, 0, 0)), (dx + 20, py))
         if getattr(dev, "rack_id", 0) in (1, 2, 3):
             r_str = f"Rack 0{dev.rack_id} (Slot {dev.u_slot}U)"
         elif getattr(dev, "device_type", "") in ("laptop", "pc"):
@@ -781,7 +786,7 @@ class Topology2D:
         # Port Summary Box
         pygame.draw.line(surface, (220, 230, 242), (dx + 20, py), (dx + dw - 20, py), 1)
         py += 12
-        surface.blit(self.font_btn.render("Port List & Active Links:", True, (20, 35, 60)), (dx + 20, py))
+        surface.blit(self.font_btn.render("Port List & Active Links:", True, (0, 0, 0)), (dx + 20, py))
         py += 26
 
         port_box_r = pygame.Rect(dx + 20, py, dw - 40, 120)
@@ -792,10 +797,10 @@ class Topology2D:
             p_y = port_box_r.y + 8 + p_idx * 26
             c_info = f"-> {port.cable.get_peer_port(port).device.hostname}:{port.cable.get_peer_port(port).name}" if port.cable else "Available"
             p_line = f"{port.name.upper()}: {port.ip_address or 'No IP'}"
-            col = (16, 145, 65) if port.is_link_up else ((210, 130, 20) if port.cable else (100, 120, 140))
+            col = (16, 145, 65) if port.is_link_up else ((210, 130, 20) if port.cable else (0, 0, 0))
             p_surf = self.font_mono.render(p_line, True, col)
             surface.blit(p_surf, (port_box_r.x + 10, p_y))
-            c_surf = self.font_node_sub.render(f"({c_info})", True, (110, 130, 155))
+            c_surf = self.font_node_sub.render(f"({c_info})", True, (0, 0, 0))
             surface.blit(c_surf, (port_box_r.x + 10 + p_surf.get_width() + 8, p_y - 1))
 
         py = port_box_r.bottom + 18
@@ -813,7 +818,7 @@ class Topology2D:
         self.cached_btn_rects["close_inspector_btn"] = done_r
         pygame.draw.rect(surface, (240, 245, 252), done_r, border_radius=6)
         pygame.draw.rect(surface, (190, 210, 235), done_r, width=1, border_radius=6)
-        d_txt = self.font_btn.render("Close", True, (25, 45, 75))
+        d_txt = self.font_btn.render("Close", True, (0, 0, 0))
         surface.blit(d_txt, (done_r.x + (done_r.w - d_txt.get_width()) // 2, done_r.y + 9))
 
     def _draw_rack_picker_modal(self, surface, w, h, mode):
@@ -847,13 +852,13 @@ class Topology2D:
 
         # Subtitle
         dev_type_str = (self.rack_picker_dev_type or "DEVICE").upper()
-        sub_s = self.font_node_sub.render(f"Configure 3D datacenter mount position for new {dev_type_str}", True, (80, 105, 135))
+        sub_s = self.font_node_sub.render(f"Configure 3D datacenter mount position for new {dev_type_str}", True, (0, 0, 0))
         surface.blit(sub_s, (dx + 20, dy + 60))
 
         py = dy + 84
 
         # Section 1: Target Rack Unit
-        sec1_lbl = self.font_btn.render("Target Server Rack:", True, (20, 35, 60))
+        sec1_lbl = self.font_btn.render("Target Server Rack:", True, (0, 0, 0))
         surface.blit(sec1_lbl, (dx + 20, py))
         py += 26
 
@@ -869,7 +874,7 @@ class Topology2D:
             is_active = (self.rack_picker_rack_id == r_id)
             bg = (0, 115, 230) if is_active else (244, 248, 254)
             border_c = (0, 90, 180) if is_active else (210, 225, 240)
-            txt_c = (255, 255, 255) if is_active else (25, 45, 75)
+            txt_c = (255, 255, 255) if is_active else (0, 0, 0)
             pygame.draw.rect(surface, bg, r_rect, border_radius=6)
             pygame.draw.rect(surface, border_c, r_rect, width=1, border_radius=6)
             tab_txt = self.font_btn.render(r_label, True, txt_c)
@@ -878,7 +883,7 @@ class Topology2D:
         py += 48
 
         # Section 2: Rack Unit Slot Stepper & Auto-Find
-        sec2_lbl = self.font_btn.render("Rack Unit Position (U-Slot 1 - 42):", True, (20, 35, 60))
+        sec2_lbl = self.font_btn.render("Rack Unit Position (U-Slot 1 - 42):", True, (0, 0, 0))
         surface.blit(sec2_lbl, (dx + 20, py))
         py += 26
 
@@ -896,7 +901,7 @@ class Topology2D:
         pygame.draw.rect(surface, (255, 255, 255), slot_box_r, border_radius=6)
         pygame.draw.rect(surface, (0, 115, 230), slot_box_r, width=1, border_radius=6)
         slot_str = f"Slot {self.rack_picker_slot}U"
-        slot_txt = self.font_btn.render(slot_str, True, (15, 35, 65))
+        slot_txt = self.font_btn.render(slot_str, True, (0, 0, 0))
         surface.blit(slot_txt, (slot_box_r.x + (slot_box_r.w - slot_txt.get_width()) // 2, slot_box_r.y + 8))
 
         # Stepper [+]
@@ -942,7 +947,7 @@ class Topology2D:
         py += 48
 
         # Section 3: Hostname Input Field
-        h_lbl = self.font_btn.render("Device Hostname:", True, (20, 35, 60))
+        h_lbl = self.font_btn.render("Device Hostname:", True, (0, 0, 0))
         surface.blit(h_lbl, (dx + 20, py))
         py += 24
 
@@ -953,7 +958,7 @@ class Topology2D:
         pygame.draw.rect(surface, h_border, h_rect, width=2 if self.rack_picker_hostname_active else 1, border_radius=6)
 
         cursor = "|" if (self.rack_picker_hostname_active and int(time.time() * 2) % 2 == 0) else ""
-        h_text_render = self.font_mono_bold.render(self.rack_picker_hostname + cursor, True, (15, 45, 80))
+        h_text_render = self.font_mono_bold.render(self.rack_picker_hostname + cursor, True, (0, 0, 0))
         surface.blit(h_text_render, (h_rect.x + 12, h_rect.y + 8))
 
         # Bottom Action Buttons
@@ -964,7 +969,7 @@ class Topology2D:
         is_c_hov = cancel_r.collidepoint(pygame.mouse.get_pos())
         pygame.draw.rect(surface, (244, 248, 254) if is_c_hov else (255, 255, 255), cancel_r, border_radius=6)
         pygame.draw.rect(surface, (190, 210, 235), cancel_r, width=1, border_radius=6)
-        c_txt = self.font_btn.render("Cancel", True, (65, 85, 115))
+        c_txt = self.font_btn.render("Cancel", True, (0, 0, 0))
         surface.blit(c_txt, (cancel_r.x + (cancel_r.w - c_txt.get_width()) // 2, cancel_r.y + 8))
 
         # Install Button
@@ -978,7 +983,7 @@ class Topology2D:
             i_txt_c = (255, 255, 255)
         else:
             i_bg = (230, 235, 242)
-            i_txt_c = (155, 170, 185)
+            i_txt_c = (0, 0, 0)
 
         pygame.draw.rect(surface, i_bg, install_r, border_radius=6)
         i_txt = self.font_btn.render("Install in Rack", True, i_txt_c)
@@ -1151,15 +1156,17 @@ class Topology2D:
             # Re-center around mouse
             self.pan_x = mx - old_wx * self.zoom
             self.pan_y = my - old_wy * self.zoom
+            if hasattr(mode, "on_topology_event"):
+                mode.on_topology_event("zoom")
             return None
 
-        # 6. Canvas Pan (Middle click or Right click drag)
-        if event.type == pygame.MOUSEBUTTONDOWN and (event.button == 2 or (event.button == 3 and not self.cable_source_dev)):
+        # 6. Canvas Pan (Middle click, Right click, or Left click on empty canvas)
+        if event.type == pygame.MOUSEBUTTONDOWN and (event.button in (2, 3) or (event.button == 1 and not self.hovered_dev and not self.placing_device_type and my > 56 and my < (screen_h - 100 if is_sandbox else screen_h))):
             self.is_panning = True
             self.pan_start_mouse = event.pos
             self.pan_start_offset = (self.pan_x, self.pan_y)
             return None
-        elif event.type == pygame.MOUSEBUTTONUP and (event.button == 2 or event.button == 3):
+        elif event.type == pygame.MOUSEBUTTONUP and (event.button in (1, 2, 3)):
             self.is_panning = False
             return None
         elif event.type == pygame.MOUSEMOTION and self.is_panning:
@@ -1167,6 +1174,8 @@ class Topology2D:
             dy = event.pos[1] - self.pan_start_mouse[1]
             self.pan_x = self.pan_start_offset[0] + dx
             self.pan_y = self.pan_start_offset[1] + dy
+            if hasattr(mode, "on_topology_event"):
+                mode.on_topology_event("pan")
             return None
 
         # 7. Device Node Hover & Interaction
@@ -1211,8 +1220,11 @@ class Topology2D:
             # Tool: Select / Drag
             else:
                 self.selected_dev = target_dev
+                self.inspect_dev = target_dev
                 self.dragging_dev = target_dev
                 self.drag_start_pos = (mx, my)
+                if hasattr(mode, "on_topology_event"):
+                    mode.on_topology_event("inspect")
                 return None
 
         # Double-click or click inspector

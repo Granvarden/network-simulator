@@ -143,6 +143,12 @@ class PacketEngine:
         """
         result = PingResult(target_ip, packets_sent=count, timeout_sec=timeout, data_bytes=data_bytes)
 
+        # Ensure dynamic routing tables are converged
+        from .rip import converge_all_rip
+        converge_all_rip()
+        from .ospf import converge_all_ospf
+        converge_all_ospf()
+
         # 0. Check self-ping (always succeeds without wire traversal)
         if self._is_self_ip(source_device, target_ip):
             result.packets_received = count
@@ -215,6 +221,11 @@ class PacketEngine:
 
         src_port = getattr(src_if, "parent_port", src_if)
         src_vlan = getattr(src_if, "vlan_id", getattr(src_port, "access_vlan", 1)) or 1
+        if isinstance(source_device, Switch) and hasattr(source_device, "svis"):
+            for s in source_device.svis.values():
+                if s.ip_address == src_ip:
+                    src_vlan = s.vlan_id
+                    break
 
         # 2. Determine next-hop IP for ARP resolution
         next_hop_ip = target_ip
@@ -249,7 +260,7 @@ class PacketEngine:
         arp_entry = source_device.lookup_arp(next_hop_ip)
         if simulate_arp:
             if not arp_entry:
-                reachable, peer_mac = self._probe_arp_resolution(source_device, src_port, next_hop_ip)
+                reachable, peer_mac = self._probe_arp_resolution(source_device, src_port, next_hop_ip, vlan_id=src_vlan)
                 if reachable:
                     source_device.add_arp_entry(next_hop_ip, peer_mac, src_port.name)
                     arp_entry = source_device.lookup_arp(next_hop_ip)
@@ -265,7 +276,7 @@ class PacketEngine:
                     return step
         elif not arp_entry:
             # Automatic ARP resolution for tests with simulate_arp=False
-            reachable, peer_mac = self._probe_arp_resolution(source_device, src_port, next_hop_ip)
+            reachable, peer_mac = self._probe_arp_resolution(source_device, src_port, next_hop_ip, vlan_id=src_vlan)
             if reachable:
                 source_device.add_arp_entry(next_hop_ip, peer_mac, src_port.name)
                 arp_entry = source_device.lookup_arp(next_hop_ip)
@@ -283,11 +294,14 @@ class PacketEngine:
         traversed_hops = [source_device.hostname]
         req_context = {"drop_code": ".", "firewall_deny": False, "unrouted": False, "l3_hops": 0}
 
+        is_sub = hasattr(src_if, "parent_port")
+        init_tagged = is_sub or (getattr(src_port, "mode", None) == "trunk" and src_vlan != getattr(src_port, "native_vlan", 1))
         req_ok = self._trace_packet(source_device, src_port, src_ip, src_mask,
                                     target_ip, req_visited, traversed_hops,
                                     current_vlan=src_vlan,
                                     ttl=15, trace_context=req_context,
-                                    src_mac=src_mac, dst_mac=dst_mac, is_reply=False)
+                                    src_mac=src_mac, dst_mac=dst_mac, is_reply=False,
+                                    is_tagged=init_tagged)
 
         step["hop_path"] = traversed_hops
 
@@ -351,7 +365,7 @@ class PacketEngine:
                 reply_if = req_context.get("destination_port")
 
             reply_port = getattr(reply_if, "parent_port", reply_if)
-            reply_vlan = getattr(reply_if, "vlan_id", getattr(reply_port, "access_vlan", 1)) or 1
+            reply_vlan = req_context.get("final_vlan", getattr(reply_if, "vlan_id", getattr(reply_port, "access_vlan", 1)) or 1)
 
             # Trace Echo Reply packet back to source
             rep_visited = set()
@@ -364,6 +378,9 @@ class PacketEngine:
                 rep_next_hop = dest_dev.default_gateway
             elif isinstance(dest_dev, Switch) and not is_ip_in_subnet(dest_reply_to_ip, reply_svi.ip_address, reply_svi.subnet_mask):
                 rep_next_hop = dest_dev.default_gateway
+            elif isinstance(dest_dev, (Router, Firewall)):
+                if rep_route and rep_route.get("next_hop") and rep_route["next_hop"] != "directly connected":
+                    rep_next_hop = rep_route["next_hop"]
 
             rep_arp = dest_dev.lookup_arp(rep_next_hop) if dest_dev else None
             if not rep_arp and dest_dev and reply_port:
@@ -377,12 +394,15 @@ class PacketEngine:
                 rep_src_mac = reply_svi.mac_address
             rep_dst_mac = rep_arp["mac"] if rep_arp else "FF:FF:FF:FF:FF:FF"
 
+            rep_is_sub = hasattr(reply_if, "parent_port")
+            rep_tagged = rep_is_sub or (getattr(reply_port, "mode", None) == "trunk" and reply_vlan != getattr(reply_port, "native_vlan", 1))
             reply_ok = self._trace_packet(dest_dev, reply_port, dest_target_ip,
                                          getattr(reply_port, "subnet_mask", "255.255.255.0"),
                                          dest_reply_to_ip, rep_visited, rep_hops,
                                          current_vlan=reply_vlan,
                                          ttl=15, trace_context=rep_context,
-                                         src_mac=rep_src_mac, dst_mac=rep_dst_mac, is_reply=True)
+                                         src_mac=rep_src_mac, dst_mac=rep_dst_mac, is_reply=True,
+                                         is_tagged=rep_tagged)
 
             if not reply_ok:
                 if rep_context.get("firewall_deny") or rep_context.get("acl_deny"):
@@ -420,78 +440,123 @@ class PacketEngine:
 
     def _probe_arp_resolution(self, source_dev, out_port, target_ip, vlan_id=None):
         """Probes whether target_ip is reachable over the broadcast domain with VLAN isolation and returns its MAC."""
-        phys_port = getattr(out_port, "parent_port", out_port)
-        if not phys_port or not phys_port.is_link_up or not phys_port.cable:
-            return False, None
-
-        peer_port = phys_port.cable.get_peer_port(phys_port)
-        if not peer_port or peer_port.is_shutdown:
-            return False, None
+        from .switch import SVI, Switch
 
         in_vlan = vlan_id
         if in_vlan is None:
-            in_vlan = getattr(out_port, "vlan_id", None) or getattr(out_port, "access_vlan", 1)
+            if isinstance(source_dev, Switch) and hasattr(source_dev, "svis"):
+                for s in source_dev.svis.values():
+                    if s.is_link_up and s.ip_address and s.subnet_mask:
+                        if is_ip_in_subnet(target_ip, s.ip_address, s.subnet_mask):
+                            in_vlan = s.vlan_id
+                            break
+            if in_vlan is None:
+                in_vlan = getattr(out_port, "vlan_id", None) or getattr(out_port, "access_vlan", 1)
 
-        # Check peer device directly
-        peer_dev = peer_port.device
-        if hasattr(peer_dev, "ports"):
-            for p in peer_dev.ports.values():
-                if p.ip_address == target_ip:
-                    return True, getattr(p, "mac_address", "02:00:1a:00:00:01")
-        if isinstance(peer_dev, Host) and peer_dev.eth0 and peer_dev.eth0.ip_address == target_ip:
-            return True, peer_dev.eth0.mac_address
+        if isinstance(out_port, SVI) or (isinstance(source_dev, Switch) and not getattr(out_port, "cable", None)):
+            peer_dev = source_dev
+            peer_port = None
+        else:
+            phys_port = getattr(out_port, "parent_port", out_port)
+            if not phys_port or not phys_port.is_link_up or not phys_port.cable:
+                return False, None
 
-        # Check through Switch - ENFORCE VLAN ISOLATION & STP BLOCKING
+            peer_port = phys_port.cable.get_peer_port(phys_port)
+            if not peer_port or peer_port.is_shutdown:
+                return False, None
+
+            # Check peer device directly
+            peer_dev = peer_port.device
+            if hasattr(peer_dev, "ports"):
+                for p in peer_dev.ports.values():
+                    if p.ip_address == target_ip:
+                        return True, getattr(p, "mac_address", "02:00:1a:00:00:01")
+            if isinstance(peer_dev, Host) and peer_dev.eth0 and peer_dev.eth0.ip_address == target_ip:
+                return True, peer_dev.eth0.mac_address
+
+        # Check through Switch - ENFORCE VLAN ISOLATION & STP BLOCKING across multi-switch trunks
         if isinstance(peer_dev, Switch):
-            if peer_dev.stp_enabled:
-                if getattr(peer_dev, "_stp_dirty", True) or peer_dev.root_bridge_id is None:
-                    peer_dev.recalculate_stp()
-                if getattr(peer_port, "stp_state", "Forwarding") == "Blocking":
-                    return False, None
+            # BFS queue: (current_switch, ingress_port, current_vlan)
+            queue = [(peer_dev, peer_port, in_vlan)]
+            visited_switches = {peer_dev}
 
-            if peer_port.mode == "access":
-                in_vlan = peer_port.access_vlan
+            while queue:
+                curr_sw, ingress_port, curr_vlan = queue.pop(0)
 
-            # Check if peer switch itself owns target_ip on SVI for in_vlan
-            if hasattr(peer_dev, "svis"):
-                svi = peer_dev.svis.get(in_vlan)
-                if svi and svi.ip_address == target_ip and svi.is_link_up:
-                    return True, svi.mac_address
-
-            for p in peer_dev.ports.values():
-                if p != peer_port and p.cable and not p.is_shutdown:
-                    # Skip STP Blocking ports
-                    if peer_dev.stp_enabled and getattr(p, "stp_state", "Forwarding") == "Blocking":
+                if curr_sw.stp_enabled:
+                    if getattr(curr_sw, "_stp_dirty", True) or curr_sw.root_bridge_id is None:
+                        curr_sw.recalculate_stp()
+                    if ingress_port and getattr(ingress_port, "stp_state", "Forwarding") == "Blocking":
                         continue
-                    # Check VLAN membership strictly
-                    if p.mode == "access" and p.access_vlan != in_vlan:
+
+                # Determine effective VLAN on ingress_port
+                effective_vlan = curr_vlan
+                if ingress_port:
+                    if ingress_port.mode == "access":
+                        effective_vlan = ingress_port.access_vlan
+                    elif ingress_port.mode == "trunk":
+                        if effective_vlan not in ingress_port.trunk_allowed_vlans:
+                            continue
+
+                # Check if current switch owns target_ip on SVI for effective_vlan
+                if hasattr(curr_sw, "svis"):
+                    svi = curr_sw.svis.get(effective_vlan)
+                    if svi and svi.ip_address == target_ip and svi.is_link_up:
+                        return True, svi.mac_address
+
+                # Inspect all other ports on current switch
+                for p in curr_sw.ports.values():
+                    if p == ingress_port or not p.cable or p.is_shutdown:
                         continue
-                    if p.mode == "trunk" and in_vlan not in p.trunk_allowed_vlans:
+                    if curr_sw.stp_enabled and getattr(p, "stp_state", "Forwarding") == "Blocking":
+                        continue
+
+                    # Check VLAN membership on egress port p
+                    if p.mode == "access":
+                        if p.access_vlan != effective_vlan:
+                            continue
+                        next_vlan = p.access_vlan
+                    elif p.mode == "trunk":
+                        if effective_vlan not in p.trunk_allowed_vlans:
+                            continue
+                        next_vlan = effective_vlan
+                    else:
                         continue
 
                     remote_port = p.cable.get_peer_port(p)
-                    if remote_port and not remote_port.is_shutdown:
-                        # Skip if remote switch port is Blocking
-                        if isinstance(remote_port.device, Switch) and remote_port.device.stp_enabled:
-                            if getattr(remote_port, "stp_state", "Forwarding") == "Blocking":
-                                continue
-                        r_dev = remote_port.device
-                        if isinstance(r_dev, Host) and r_dev.eth0 and r_dev.eth0.ip_address == target_ip:
-                            return True, r_dev.eth0.mac_address
-                        if hasattr(r_dev, "ports"):
-                            for rp in r_dev.ports.values():
-                                if rp.ip_address == target_ip:
-                                    return True, getattr(rp, "mac_address", "02:00:1a:00:00:01")
-                        if hasattr(r_dev, "subinterfaces"):
-                            for sub in r_dev.subinterfaces.values():
-                                if sub.ip_address == target_ip:
-                                    if sub.vlan_id is None or sub.vlan_id == in_vlan:
-                                        parent = getattr(sub, "parent_port", sub)
-                                        return True, getattr(parent, "mac_address", "02:00:1a:00:00:01")
-                        if hasattr(r_dev, "svis"):
-                            r_svi = r_dev.svis.get(in_vlan)
-                            if r_svi and r_svi.ip_address == target_ip and r_svi.is_link_up:
-                                return True, r_svi.mac_address
+                    if not remote_port or remote_port.is_shutdown:
+                        continue
+
+                    r_dev = remote_port.device
+                    if isinstance(r_dev, Switch):
+                        if r_dev.stp_enabled and getattr(remote_port, "stp_state", "Forwarding") == "Blocking":
+                            continue
+                        if remote_port.mode == "access" and remote_port.access_vlan != next_vlan:
+                            continue
+                        if remote_port.mode == "trunk" and next_vlan not in remote_port.trunk_allowed_vlans:
+                            continue
+                        if r_dev not in visited_switches:
+                            visited_switches.add(r_dev)
+                            queue.append((r_dev, remote_port, next_vlan))
+                        continue
+
+                    # Endpoint devices (Host, Router, Firewall)
+                    if isinstance(r_dev, Host) and r_dev.eth0 and r_dev.eth0.ip_address == target_ip:
+                        return True, r_dev.eth0.mac_address
+                    if hasattr(r_dev, "ports"):
+                        for rp in r_dev.ports.values():
+                            if rp.ip_address == target_ip:
+                                return True, getattr(rp, "mac_address", "02:00:1a:00:00:01")
+                    if hasattr(r_dev, "subinterfaces"):
+                        for sub in r_dev.subinterfaces.values():
+                            if sub.ip_address == target_ip:
+                                if sub.vlan_id is None or sub.vlan_id == next_vlan:
+                                    parent = getattr(sub, "parent_port", sub)
+                                    return True, getattr(parent, "mac_address", "02:00:1a:00:00:01")
+                    if hasattr(r_dev, "svis"):
+                        r_svi = r_dev.svis.get(next_vlan)
+                        if r_svi and r_svi.ip_address == target_ip and r_svi.is_link_up:
+                            return True, r_svi.mac_address
 
         return False, None
 
@@ -511,6 +576,10 @@ class PacketEngine:
             if hasattr(dev, "get_interface"):
                 sub = dev.get_interface(preferred_interface)
                 if sub and sub.is_link_up and sub.ip_address:
+                    from .switch import SVI
+                    if isinstance(sub, SVI):
+                        phys = dev.get_first_active_port_for_vlan(sub.vlan_id) if hasattr(dev, "get_first_active_port_for_vlan") else None
+                        return phys or sub, sub.ip_address, sub.subnet_mask
                     return sub, sub.ip_address, sub.subnet_mask
 
         # For Routers / Firewalls: choose interface based on routing table or destination subnet
@@ -528,14 +597,32 @@ class PacketEngine:
 
             # 2. Check routing table
             route = dev.lookup_route(target_ip)
-            if route and route.get("interface"):
-                p = dev.get_port(route["interface"])
-                if p and p.is_link_up and p.ip_address:
-                    return p, p.ip_address, p.subnet_mask
-                if hasattr(dev, "get_interface"):
-                    sub = dev.get_interface(route["interface"])
-                    if sub and sub.is_link_up and sub.ip_address:
-                        return sub, sub.ip_address, sub.subnet_mask
+            if route:
+                target_if = route.get("interface")
+                if not target_if and route.get("next_hop") and route["next_hop"] != "directly connected":
+                    nh_route = dev.lookup_route(route["next_hop"])
+                    if nh_route and nh_route.get("interface"):
+                        target_if = nh_route["interface"]
+                    else:
+                        for p in dev.ports.values():
+                            if p.is_link_up and p.ip_address and p.subnet_mask:
+                                if is_ip_in_subnet(route["next_hop"], p.ip_address, p.subnet_mask):
+                                    target_if = p.name
+                                    break
+                        if not target_if and hasattr(dev, "subinterfaces"):
+                            for sub in dev.subinterfaces.values():
+                                if sub.is_link_up and sub.ip_address and sub.subnet_mask:
+                                    if is_ip_in_subnet(route["next_hop"], sub.ip_address, sub.subnet_mask):
+                                        target_if = sub.name
+                                        break
+                if target_if:
+                    p = dev.get_port(target_if)
+                    if p and p.is_link_up and p.ip_address:
+                        return p, p.ip_address, p.subnet_mask
+                    if hasattr(dev, "get_interface"):
+                        sub = dev.get_interface(target_if)
+                        if sub and sub.is_link_up and sub.ip_address:
+                            return sub, sub.ip_address, sub.subnet_mask
 
         # For Switches: select active SVI based on destination subnet or default gateway
         if isinstance(dev, Switch):
@@ -595,7 +682,7 @@ class PacketEngine:
 
     def _trace_packet(self, current_dev, out_port, current_ip, current_mask,
                       target_ip, visited, hop_path, current_vlan=1, ttl=15,
-                      trace_context=None, src_mac=None, dst_mac=None, is_reply=False):
+                      trace_context=None, src_mac=None, dst_mac=None, is_reply=False, is_tagged=False):
         if trace_context is None:
             trace_context = {}
 
@@ -617,7 +704,13 @@ class PacketEngine:
             trace_context["drop_code"] = "U"
             trace_context["interface_down"] = True
             return False
-        out_port.trigger_traffic()
+        if isinstance(current_dev, Switch) and getattr(current_dev, "stp_enabled", False):
+            if getattr(out_port, "stp_state", "Forwarding") == "Blocking":
+                trace_context["drop_reason"] = f"Port {out_port.name} on {current_dev.hostname} is in STP Blocking state"
+                trace_context["drop_code"] = "."
+                return False
+        if hasattr(out_port, "trigger_traffic"):
+            out_port.trigger_traffic()
 
         # 2. Check physical cable link
         cable = out_port.cable
@@ -637,42 +730,80 @@ class PacketEngine:
         next_dev = peer_port.device
         hop_path.append(next_dev.hostname)
 
+        # Ingress frame processing on Switch
+        in_vlan = current_vlan
+        if isinstance(next_dev, Switch):
+            if getattr(next_dev, "stp_enabled", False):
+                if getattr(peer_port, "stp_state", "Forwarding") == "Blocking":
+                    trace_context["drop_reason"] = f"Port {peer_port.name} on {next_dev.hostname} is in STP Blocking state"
+                    trace_context["drop_code"] = "."
+                    return False
+            if peer_port.mode == "access":
+                if is_tagged:
+                    trace_context["drop_reason"] = f"Access port {peer_port.name} on {next_dev.hostname} dropped tagged frame (VLAN {current_vlan})"
+                    trace_context["drop_code"] = "."
+                    return False
+                in_vlan = peer_port.access_vlan
+            elif peer_port.mode == "trunk":
+                if is_tagged:
+                    if current_vlan not in peer_port.trunk_allowed_vlans:
+                        trace_context["drop_reason"] = f"Trunk port {peer_port.name} on {next_dev.hostname} dropped disallowed VLAN {current_vlan}"
+                        trace_context["drop_code"] = "."
+                        return False
+                    in_vlan = current_vlan
+                else:
+                    # Untagged frame arriving on trunk port
+                    if getattr(out_port, "mode", None) == "trunk":
+                        if getattr(out_port, "native_vlan", 1) != getattr(peer_port, "native_vlan", 1):
+                            trace_context["drop_reason"] = f"% Native VLAN mismatch detected: local {peer_port.native_vlan} vs remote {out_port.native_vlan}"
+                            trace_context["drop_code"] = "."
+                            return False
+                    in_vlan = getattr(peer_port, "native_vlan", 1)
+                    if in_vlan not in peer_port.trunk_allowed_vlans:
+                        trace_context["drop_reason"] = f"Trunk port {peer_port.name} on {next_dev.hostname} native VLAN {in_vlan} is not allowed"
+                        trace_context["drop_code"] = "."
+                        return False
+
         # 4. Handle destination matches on next_dev
-        if self._is_device_ip(next_dev, target_ip, peer_port, current_vlan):
+        if self._is_device_ip(next_dev, target_ip, peer_port, in_vlan):
             trace_context["destination_device"] = next_dev
             trace_context["destination_port"] = peer_port
             trace_context["final_src_ip"] = current_ip
             trace_context["final_dst_ip"] = target_ip
+            trace_context["final_vlan"] = in_vlan
             return True
 
         # 5. Layer 2 Switching logic (MAC Learning & Forwarding)
         if isinstance(next_dev, Switch):
-            in_vlan = current_vlan
-            if peer_port.mode == "access":
-                in_vlan = peer_port.access_vlan
-            elif peer_port.mode == "trunk":
-                pass  # keeps incoming tagged vlan
-
             active_src_mac = src_mac or getattr(out_port, "mac_address", "02:00:1a:00:00:01")
             active_dst_mac = dst_mac or "FF:FF:FF:FF:FF:FF"
 
             out_ports = next_dev.forward_packet(peer_port, active_src_mac, active_dst_mac, in_vlan)
             if not out_ports:
-                trace_context["drop_reason"] = "Switch dropped frame (VLAN mismatch or port down)"
+                trace_context["drop_reason"] = "Switch dropped frame (VLAN mismatch, blocked, or port down)"
                 trace_context["drop_code"] = "."
                 return False
 
             for cand_port in out_ports:
                 if cand_port.cable and cand_port.cable.get_peer_port(cand_port) != out_port:
-                    cand_vlan = in_vlan
                     if cand_port.mode == "access":
                         cand_vlan = cand_port.access_vlan
+                        cand_tagged = False
+                    elif cand_port.mode == "trunk":
+                        cand_vlan = in_vlan
+                        if in_vlan == getattr(cand_port, "native_vlan", 1):
+                            cand_tagged = False
+                        else:
+                            cand_tagged = True
+                    else:
+                        cand_vlan = in_vlan
+                        cand_tagged = False
 
                     if self._trace_packet(next_dev, cand_port, current_ip, current_mask,
                                           target_ip, visited.copy(), hop_path, current_vlan=cand_vlan,
                                           ttl=ttl-1, trace_context=trace_context,
                                           src_mac=active_src_mac, dst_mac=active_dst_mac,
-                                          is_reply=is_reply):
+                                          is_reply=is_reply, is_tagged=cand_tagged):
                         return True
             return False
 
@@ -822,11 +953,12 @@ class PacketEngine:
             router_src_mac = getattr(physical_port, "mac_address", "02:00:1a:00:00:01")
             trace_context["l3_hops"] = trace_context.get("l3_hops", 0) + 1
 
+            is_sub = hasattr(egress_if, "parent_port")
             return self._trace_packet(next_dev, physical_port, active_src_ip,
                                      getattr(egress_if, "subnet_mask", current_mask), effective_target_ip,
                                      visited, hop_path, current_vlan=vlan_tag, ttl=ttl-1,
                                      trace_context=trace_context, src_mac=router_src_mac, dst_mac=dst_next_mac,
-                                     is_reply=is_reply)
+                                     is_reply=is_reply, is_tagged=is_sub)
 
         return False
 
@@ -861,11 +993,24 @@ class PacketEngine:
                     return True
         return False
 
+    def converge_rip(self, max_rounds=6):
+        from .rip import converge_all_rip
+        converge_all_rip(max_rounds=max_rounds)
+
+    def converge_ospf(self, max_rounds=10):
+        from .ospf import converge_all_ospf
+        converge_all_ospf(max_rounds=max_rounds)
+
     def simulate_traceroute(self, source_device, target_ip, max_hops=30, source_interface=None):
         """
         Simulates hop-by-hop traceroute to target_ip.
         Returns a list of dicts: [{'hop': 1, 'ip': '...', 'name': '...', 'rtts': [1.2, 1.1, 1.4]}, ...]
         """
+        from .rip import converge_all_rip
+        converge_all_rip()
+        from .ospf import converge_all_ospf
+        converge_all_ospf()
+
         if self._is_self_ip(source_device, target_ip):
             return [{
                 "hop": 1,
@@ -885,7 +1030,7 @@ class PacketEngine:
         trace_context = {}
         success = self._trace_packet(source_device, src_port, src_ip, src_mask,
                                      target_ip, visited, traversed,
-                                     current_vlan=src_port.access_vlan,
+                                     current_vlan=getattr(src_port, "vlan_id", getattr(src_port, "access_vlan", 1)) or 1,
                                      trace_context=trace_context)
 
         # Filter hop devices (exclude layer 2 switches, focus on L3 hops)
@@ -996,6 +1141,10 @@ class PacketEngine:
 
                     if isinstance(r_dev, Switch):
                         if r_dev.stp_enabled and getattr(r_port, "stp_state", "Forwarding") == "Blocking":
+                            continue
+                        if r_port.mode == "trunk" and curr_vlan not in r_port.trunk_allowed_vlans:
+                            continue
+                        if r_port.mode == "access" and r_port.access_vlan != curr_vlan:
                             continue
                         if r_dev not in visited_switches:
                             visited_switches.add(r_dev)

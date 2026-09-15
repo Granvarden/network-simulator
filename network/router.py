@@ -6,6 +6,7 @@ Supports Subinterfaces (802.1Q Trunking), Static Routing, and ARP lookup.
 import time
 import socket
 import struct
+import weakref
 from .device import BaseDevice, Port
 
 def is_valid_ipv4(ip_str):
@@ -27,7 +28,7 @@ def is_valid_netmask(mask_str):
         return False
     val = ip_to_int(mask_str)
     if val == 0:
-        return False
+        return True
     inv = (~val) & 0xFFFFFFFF
     return (inv & (inv + 1)) == 0
 
@@ -65,6 +66,7 @@ class SubInterface:
         self.ip_address = None
         self.subnet_mask = None
         self.vlan_id = None  # 802.1Q encapsulation
+        self.ospf_cost = 1   # Default OSPF interface cost
         self.is_shutdown = False
 
     @property
@@ -73,8 +75,11 @@ class SubInterface:
 
 
 class Router(BaseDevice):
+    _all_routers = weakref.WeakSet()
+
     def __init__(self, id, hostname="Router", rack_id=1, u_slot=28, num_ports=4):
         super().__init__(id, hostname, device_type="router", rack_id=rack_id, u_slot=u_slot)
+        Router._all_routers.add(self)
         self.height = 0.044 * 2  # 2U rack height for enterprise router
         self.subinterfaces = {}  # name -> SubInterface
 
@@ -100,6 +105,101 @@ class Router(BaseDevice):
 
         from .dhcp import DHCPServer
         self.dhcp_server = DHCPServer(self)
+
+        from .rip import RIPProcess
+        self.rip = RIPProcess(self)
+
+        from .ospf import OSPFProcess
+        self.ospf = OSPFProcess(self)
+
+    @property
+    def rip_enabled(self):
+        return self.rip.enabled
+
+    @rip_enabled.setter
+    def rip_enabled(self, val):
+        self.rip.enabled = bool(val)
+
+    @property
+    def rip_version(self):
+        return self.rip.version
+
+    @rip_version.setter
+    def rip_version(self, val):
+        self.rip.version = int(val)
+
+    @property
+    def rip_networks(self):
+        return self.rip.networks
+
+    @property
+    def rip_neighbors(self):
+        return self.rip.neighbors
+
+    @property
+    def rip_routes(self):
+        return self.rip.routes
+
+    def enable_rip(self, version=2):
+        self.rip.version = version
+        self.rip.enable()
+
+    def disable_rip(self):
+        self.rip.disable()
+
+    def add_rip_network(self, network_str):
+        return self.rip.add_network(network_str)
+
+    def remove_rip_network(self, network_str):
+        return self.rip.remove_network(network_str)
+
+    # --- OSPF Properties & Methods ---
+    @property
+    def ospf_enabled(self):
+        return self.ospf.enabled
+
+    @ospf_enabled.setter
+    def ospf_enabled(self, val):
+        self.ospf.enabled = bool(val)
+
+    @property
+    def ospf_process_id(self):
+        return self.ospf.process_id
+
+    @property
+    def ospf_router_id(self):
+        return self.ospf.get_router_id()
+
+    @property
+    def ospf_networks(self):
+        return self.ospf.networks
+
+    @property
+    def ospf_neighbors(self):
+        return self.ospf.neighbors
+
+    @property
+    def ospf_routes(self):
+        return self.ospf.routes
+
+    @property
+    def ospf_lsdb(self):
+        return self.ospf.lsdb
+
+    def enable_ospf(self, process_id=1):
+        self.ospf.enable(process_id=process_id)
+
+    def disable_ospf(self):
+        self.ospf.disable()
+
+    def set_ospf_router_id(self, router_id_str):
+        return self.ospf.set_router_id(router_id_str)
+
+    def add_ospf_network(self, network_str, wildcard_str="0.0.0.0", area=0):
+        return self.ospf.add_network(network_str, wildcard_str, area=area)
+
+    def remove_ospf_network(self, network_str, wildcard_str="0.0.0.0", area=0):
+        return self.ospf.remove_network(network_str, wildcard_str, area=area)
 
     def get_port_local_pos(self, port_name, port_index=0):
         """Returns exact local coordinates (x, y, z) on Router front face."""
@@ -144,18 +244,24 @@ class Router(BaseDevice):
         mask = mask.strip()
         next_hop_or_int = next_hop_or_int.strip()
 
-        if not is_valid_ipv4(network) or not is_valid_ipv4(mask):
+        if not is_valid_ipv4(network) or not is_valid_netmask(mask):
             return False
 
-        # Remove duplicate if exists
-        self.routes = [r for r in self.routes if not (r["network"] == network and r["mask"] == mask)]
         is_ip = is_valid_ipv4(next_hop_or_int)
+        if not is_ip:
+            # Must be a valid interface on this router
+            if not self.get_interface(next_hop_or_int):
+                return False
+
+        # Remove duplicate if exists (Deterministic REPLACE)
+        self.routes = [r for r in self.routes if not (r["network"] == network and r["mask"] == mask)]
         route = {
             "network": network,
             "mask": mask,
             "next_hop": next_hop_or_int if is_ip else None,
             "interface": None if is_ip else next_hop_or_int,
-            "type": "S"
+            "type": "S",
+            "admin_distance": 1
         }
         self.routes.append(route)
         return True
@@ -188,7 +294,8 @@ class Router(BaseDevice):
                     "mask": port.subnet_mask,
                     "next_hop": "directly connected",
                     "interface": port.name,
-                    "type": "C"
+                    "type": "C",
+                    "admin_distance": 0
                 })
 
         # 2. Directly Connected routes from subinterfaces
@@ -201,7 +308,8 @@ class Router(BaseDevice):
                     "mask": sub.subnet_mask,
                     "next_hop": "directly connected",
                     "interface": sub.name,
-                    "type": "C"
+                    "type": "C",
+                    "admin_distance": 0
                 })
 
         # 3. Static routes - check interface link up if interface is specified
@@ -213,14 +321,27 @@ class Router(BaseDevice):
             else:
                 all_routes.append(r)
 
+        # 4. Active dynamic RIP routes (metric < 16)
+        if getattr(self, "rip_enabled", False) and hasattr(self, "rip"):
+            for r in self.rip.routes.values():
+                if r.get("metric", 16) < 16:
+                    all_routes.append(r)
+
+        # 5. Active dynamic OSPF routes
+        if getattr(self, "ospf_enabled", False) and hasattr(self, "ospf"):
+            for r in self.ospf.routes.values():
+                all_routes.append(r)
+
         return all_routes
 
     def lookup_route(self, dest_ip):
-        """Longest prefix match routing lookup."""
+        """Longest prefix match routing lookup with administrative distance and metric precedence."""
         if not is_valid_ipv4(dest_ip):
             return None
         best_match = None
         best_prefix_len = -1
+        best_ad = 999
+        best_metric = 999
 
         for r in self.get_all_routes():
             net = r["network"]
@@ -228,8 +349,23 @@ class Router(BaseDevice):
             if is_ip_in_subnet(dest_ip, net, mask):
                 # Count bits in mask
                 prefix_len = bin(ip_to_int(mask)).count("1")
+                ad = r.get("admin_distance", 0 if r.get("type") == "C" else (1 if r.get("type") == "S" else (110 if r.get("type") == "O" else 120)))
+                metric = r.get("metric", 0)
+
+                is_better = False
                 if prefix_len > best_prefix_len:
+                    is_better = True
+                elif prefix_len == best_prefix_len:
+                    if ad < best_ad:
+                        is_better = True
+                    elif ad == best_ad:
+                        if metric < best_metric:
+                            is_better = True
+
+                if is_better:
                     best_prefix_len = prefix_len
+                    best_ad = ad
+                    best_metric = metric
                     best_match = r
         return best_match
 

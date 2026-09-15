@@ -2,6 +2,8 @@
 ui/menu.py - Main Menu, Pause Dialog, Controls Cheatsheet, 2D Topology Visualizer, and Rack Device Manager
 """
 
+import os
+import json
 import pygame
 import math
 from network.switch import Switch
@@ -12,7 +14,7 @@ from ui.topology_2d import Topology2D
 
 SHOWCASE_COMMANDS = {
     "router": {
-        "categories": ["ALL", "IP & INTERFACES", "ROUTING & GW", "ROUTER-ON-A-STICK", "DHCP SERVER", "NAT & PAT", "SHOW & DIAG"],
+        "categories": ["ALL", "IP & INTERFACES", "STATIC ROUTING", "OSPF ROUTING", "RIP ROUTING", "ROUTER-ON-A-STICK", "DHCP SERVER", "NAT & PAT", "SHOW & DIAG"],
         "commands": [
             {
                 "cmd": "interface <name>",
@@ -44,24 +46,59 @@ SHOWCASE_COMMANDS = {
             },
             {
                 "cmd": "ip route 0.0.0.0 0.0.0.0 <gw>",
-                "cat": "ROUTING & GW",
+                "cat": "STATIC ROUTING",
                 "desc": "Configure default static route (Gateway of Last Resort to Internet)",
                 "desc_th": "กำหนด Default Route ส่งข้อมูลออก Internet ผ่าน Next-Hop",
                 "example": "Router(config)# ip route 0.0.0.0 0.0.0.0 203.0.113.1"
             },
             {
                 "cmd": "ip route <dest> <mask> <gw>",
-                "cat": "ROUTING & GW",
+                "cat": "STATIC ROUTING",
                 "desc": "Add static route for a specific destination subnet via next-hop IP",
                 "desc_th": "กำหนดเส้นทาง Static Route ไปยัง Subnet ปลายทางที่ต้องการ",
                 "example": "Router(config)# ip route 10.10.20.0 255.255.255.0 192.168.1.254"
             },
             {
-                "cmd": "show ip route",
-                "cat": "ROUTING & GW",
-                "desc": "Display the active IPv4 routing table and gateway information",
-                "desc_th": "แสดงตารางเส้นทาง IPv4 Routing Table ของเราเตอร์",
-                "example": "Router# show ip route"
+                "cmd": "router ospf <process-id>",
+                "cat": "OSPF ROUTING",
+                "desc": "Enable OSPF link-state dynamic routing process",
+                "desc_th": "เปิดใช้งาน OSPF Dynamic Routing Process บนเราเตอร์",
+                "example": "Router(config)# router ospf 1"
+            },
+            {
+                "cmd": "network <net> <wildcard> area <area>",
+                "cat": "OSPF ROUTING",
+                "desc": "Advertise subnet and wildcard mask into an OSPF area",
+                "desc_th": "ประกาศ Subnet และ Wildcard Mask เข้า OSPF Area (เช่น Area 0)",
+                "example": "Router(config-router)# network 192.168.1.0 0.0.0.255 area 0"
+            },
+            {
+                "cmd": "router-id <ip>",
+                "cat": "OSPF ROUTING",
+                "desc": "Manually set 32-bit unique OSPF Router Identifier",
+                "desc_th": "กำหนดหมายเลข OSPF Router ID ประจำเครื่องเราเตอร์",
+                "example": "Router(config-router)# router-id 1.1.1.1"
+            },
+            {
+                "cmd": "router rip",
+                "cat": "RIP ROUTING",
+                "desc": "Enable Routing Information Protocol (RIP) dynamic routing",
+                "desc_th": "เปิดใช้งาน RIP Dynamic Routing Process บนเราเตอร์",
+                "example": "Router(config)# router rip"
+            },
+            {
+                "cmd": "version 2",
+                "cat": "RIP ROUTING",
+                "desc": "Configure RIP to Version 2 supporting CIDR and subnet masks",
+                "desc_th": "ปรับโหมดการทำงานเป็น RIPv2 เพื่อรองรับ Classless CIDR",
+                "example": "Router(config-router)# version 2"
+            },
+            {
+                "cmd": "network <major-net>",
+                "cat": "RIP ROUTING",
+                "desc": "Advertise major network boundary in RIP distance-vector routing",
+                "desc_th": "ประกาศ Classful Network Boundary เข้าสู่โพรโทคอล RIP",
+                "example": "Router(config-router)# network 10.0.0.0"
             },
             {
                 "cmd": "interface <name>.<sub_id>",
@@ -127,11 +164,39 @@ SHOWCASE_COMMANDS = {
                 "example": "Router(config)# ip nat inside source list 1 interface g0/0 overload"
             },
             {
+                "cmd": "show ip route",
+                "cat": "SHOW & DIAG",
+                "desc": "Display the active IPv4 routing table (Connected, Static, OSPF, RIP)",
+                "desc_th": "แสดงตารางเส้นทาง IPv4 Routing Table ทั้งหมด",
+                "example": "Router# show ip route"
+            },
+            {
                 "cmd": "show ip interface brief",
                 "cat": "SHOW & DIAG",
                 "desc": "Display summary table of all interface states, IPs, and link status",
                 "desc_th": "แสดงตารางสรุปสถานะ Up/Down และหมายเลข IP ของทุกพอร์ต",
                 "example": "Router# show ip interface brief"
+            },
+            {
+                "cmd": "show ip ospf neighbor",
+                "cat": "SHOW & DIAG",
+                "desc": "Display OSPF neighbor 2-Way and Full adjacency states",
+                "desc_th": "แสดงสถานะ Adjacency และเพื่อนบ้าน Neighbor ของโพรโทคอล OSPF",
+                "example": "Router# show ip ospf neighbor"
+            },
+            {
+                "cmd": "show ip ospf database",
+                "cat": "SHOW & DIAG",
+                "desc": "Display OSPF Link-State Database (LSDB Router-LSAs)",
+                "desc_th": "แสดงฐานข้อมูล Link-State (LSDB) ของ OSPF",
+                "example": "Router# show ip ospf database"
+            },
+            {
+                "cmd": "show ip rip",
+                "cat": "SHOW & DIAG",
+                "desc": "Display RIP routing database, route metrics, and timers",
+                "desc_th": "แสดงฐานข้อมูลและเมตริกของโพรโทคอล RIP",
+                "example": "Router# show ip rip"
             },
             {
                 "cmd": "ping <target_ip>",
@@ -190,9 +255,16 @@ SHOWCASE_COMMANDS = {
             {
                 "cmd": "switchport trunk allowed vlan <list>",
                 "cat": "TRUNK (802.1Q)",
-                "desc": "Filter which VLANs are permitted to traverse this trunk link",
+                "desc": "Filter which VLANs are permitted to traverse this trunk link (add, remove, all)",
                 "desc_th": "จำกัดหมายเลข VLAN ที่ได้รับอนุญาตให้ส่งผ่าน Trunk พอร์ตนี้",
                 "example": "Switch(config-if)# switchport trunk allowed vlan 10,20,30"
+            },
+            {
+                "cmd": "switchport trunk native vlan <id>",
+                "cat": "TRUNK (802.1Q)",
+                "desc": "Set native untagged VLAN ID for 802.1Q trunk port (default 1)",
+                "desc_th": "กำหนด Native VLAN สำหรับเฟรมที่ไม่ได้ติด Tag 802.1Q",
+                "example": "Switch(config-if)# switchport trunk native vlan 99"
             },
             {
                 "cmd": "interface vlan <id>",
@@ -239,9 +311,23 @@ SHOWCASE_COMMANDS = {
             {
                 "cmd": "show mac address-table",
                 "cat": "SHOW & DIAG",
-                "desc": "Display CAM hardware table mapping learned MAC addresses to ports",
-                "desc_th": "แสดงตาราง MAC Address Table ที่สวิตช์เรียนรู้ได้ในแต่ละพอร์ต",
+                "desc": "Display CAM hardware table mapping learned MAC addresses to VLAN and port",
+                "desc_th": "แสดงตาราง MAC Address Table แยกตาม VLAN และพอร์ตที่สวิตช์เรียนรู้ได้",
                 "example": "Switch# show mac address-table"
+            },
+            {
+                "cmd": "show interfaces trunk",
+                "cat": "SHOW & DIAG",
+                "desc": "Display active 802.1Q trunking ports, native VLANs, and allowed VLAN lists",
+                "desc_th": "แสดงสถานะพอร์ตที่เป็น Trunk ทั้งหมด, Native VLAN และ VLAN ที่อนุญาต",
+                "example": "Switch# show interfaces trunk"
+            },
+            {
+                "cmd": "show interfaces switchport",
+                "cat": "SHOW & DIAG",
+                "desc": "Display detailed switchport mode, trunk encapsulation, and native VLAN",
+                "desc_th": "แสดงรายละเอียดโหมดการทำงาน Switchport แบบละเอียดของแต่ละพอร์ต",
+                "example": "Switch# show interfaces switchport"
             },
             {
                 "cmd": "show interfaces status",
@@ -584,6 +670,7 @@ SHOWCASE_COMMANDS = {
 
 class MenuState:
     MAIN_MENU = "MAIN_MENU"
+    TUTORIAL_SELECT = "TUTORIAL_SELECT"
     IN_GAME = "IN_GAME"
     PAUSE = "PAUSE"
     TOPOLOGY_MAP = "TOPOLOGY_MAP"
@@ -650,6 +737,11 @@ class MenuManager:
         self.dm_scroll_offset = 0
         self.dm_feedback = ""
         self.dm_feedback_color = (15, 140, 65)
+
+        # Chapter Selection UI State
+        self.selected_chapter_idx = 0
+        self._chapter_card_rects = []
+        self._tutorial_back_btn_rect = None
 
         # 3D Showcase & CLI Cheatsheet State
         self.showcase_devices = []
@@ -974,6 +1066,9 @@ class MenuManager:
                     self.state = MenuState.MAIN_MENU
                     return "TO_MAIN_MENU"
 
+        elif self.state == MenuState.TUTORIAL_SELECT:
+            return self._handle_tutorial_select_input(event, sound_mgr, screen_w, screen_h)
+
         elif self.state == MenuState.TOPOLOGY_MAP:
             action = self.topology_2d.handle_input(event, sound_mgr, screen_w, screen_h, mode)
             if action == "RESUME":
@@ -1046,7 +1141,10 @@ class MenuManager:
                         if self.dm_rack_filter == 0 or d.rack_id == self.dm_rack_filter
                     ]
                     # Sort by rack then slot descending (top to bottom of rack)
-                    filtered_devs.sort(key=lambda d: (d.rack_id, -d.u_slot))
+                    filtered_devs.sort(key=lambda d: (
+                        int(d.rack_id) if getattr(d, 'rack_id', None) is not None else 0,
+                        -(int(d.u_slot) if getattr(d, 'u_slot', None) is not None else 0)
+                    ))
 
                     row_h = 58
                     row_gap = 6
@@ -1253,6 +1351,271 @@ class MenuManager:
 
         return None
 
+    def _get_completed_chapters(self):
+        """Read completed chapters list from tutorial_progress.json."""
+        progress_path = "tutorial_progress.json"
+        if os.path.exists(progress_path):
+            try:
+                with open(progress_path, "r", encoding="utf-8") as fp:
+                    data = json.load(fp)
+                    if isinstance(data, dict):
+                        return data.get("completed_chapters", [])
+            except Exception:
+                pass
+        return []
+
+    def _draw_tutorial_chapter_select(self, surface, screen_w, screen_h):
+        """Draw interactive Chapter Selection Cards screen for Tutorial Mode."""
+        # 1. Semi-transparent dark blue backdrop overlay
+        overlay = pygame.Surface((screen_w, screen_h), pygame.SRCALPHA)
+        overlay.fill((10, 18, 32, 235))
+        surface.blit(overlay, (0, 0))
+
+        # 2. Header Bar
+        self._tutorial_back_btn_rect = pygame.Rect(28, 18, 220, 36)
+        mx, my = pygame.mouse.get_pos()
+        is_back_hov = self._tutorial_back_btn_rect.collidepoint(mx, my)
+        back_bg = (28, 48, 76) if is_back_hov else (18, 32, 54)
+        back_border = (0, 160, 255) if is_back_hov else (45, 75, 115)
+        pygame.draw.rect(surface, back_bg, self._tutorial_back_btn_rect, border_radius=6)
+        pygame.draw.rect(surface, back_border, self._tutorial_back_btn_rect, width=1, border_radius=6)
+        b_txt = self.font_guide_btn.render("< Return to Menu [ESC]", True, (240, 248, 255))
+        surface.blit(b_txt, (self._tutorial_back_btn_rect.x + (self._tutorial_back_btn_rect.w - b_txt.get_width()) // 2, self._tutorial_back_btn_rect.y + 8))
+
+        # Title & Subtitle
+        header_title = self.font_guide_title.render("NETENGINEER ACADEMY // TRAINING CHAPTERS", True, (240, 248, 255))
+        sub_title = self.font_guide_sub.render("Master hands-on network engineering from datacenter hardware to Cisco CLI", True, (100, 185, 255))
+        surface.blit(header_title, (self._tutorial_back_btn_rect.right + 28, 12))
+        surface.blit(sub_title, (self._tutorial_back_btn_rect.right + 28, 42))
+
+        # 3. Chapter Cards Layout
+        completed = self._get_completed_chapters()
+        card_w = min(365, (screen_w - 90) // 3)
+        card_h = min(545, screen_h - 145)
+        gap = 18
+        total_w = 3 * card_w + 2 * gap
+        start_x = (screen_w - total_w) // 2
+        card_y = 72
+
+        chapters = [
+            {
+                "id": "chapter_1",
+                "tag": "CHAPTER 01",
+                "name": "Datacenter Onboarding",
+                "desc_th": "สอนเล่น * ติดตั้งตู้ Rack * ต่อสาย * Cisco CLI * 2D Topology",
+                "desc_en": "Learn foundational network engineer controls, equipment mounting, cabling, Cisco IOS modes, and 2D topology.",
+                "pillars": [
+                    "[1] Controls & Orientation (WASD, Mouse, Sprint)",
+                    "[2] 42U Rack Equipment Mounting ([N])",
+                    "[3] Physical Layer Cabling (Cat6 Server to Switch)",
+                    "[4] Cisco IOS Navigation (User -> Config Mode)",
+                    "[5] 2D Logical Topology & Inspection (Packet Tracer)",
+                ],
+                "diff": "BEGINNER",
+                "time": "~5-8 MIN",
+                "is_unlocked": True,
+                "is_completed": "chapter_1" in completed,
+            },
+            {
+                "id": "chapter_2",
+                "tag": "CHAPTER 02",
+                "name": "Switching & VLANs",
+                "desc_th": "VLAN * Access / Trunk (802.1Q) * Spanning Tree (STP)",
+                "desc_en": "Master Layer 2 broadcast domains, VLAN tagging, multi-VLAN trunks, and STP loop avoidance.",
+                "pillars": [
+                    "[1] VLAN Broadcast Domains (VLAN 10, 20)",
+                    "[2] Switchport Mode Access Configuration",
+                    "[3] 802.1Q Multi-VLAN Trunking & Native VLAN",
+                    "[4] Rapid Per-VLAN Spanning Tree (STP)",
+                    "[5] SVI Management Interface & Gateway",
+                ],
+                "diff": "INTERMEDIATE",
+                "time": "~10-15 MIN",
+                "is_unlocked": False,
+                "is_completed": False,
+            },
+            {
+                "id": "chapter_3",
+                "tag": "CHAPTER 03",
+                "name": "IP Routing & NAT Gateway",
+                "desc_th": "Static Route * OSPF * DHCP Server * NAT/PAT Overload",
+                "desc_en": "Configure Layer 3 static and dynamic OSPF routing, DHCP automated addressing, and NAT internet access.",
+                "pillars": [
+                    "[1] Default Route (Gateway of Last Resort)",
+                    "[2] Dynamic Routing with OSPF Area 0",
+                    "[3] Cisco IOS DHCP Server Address Pools",
+                    "[4] NAT / PAT Overload for Internet Access",
+                    "[5] Multi-hop Ping & Traceroute Verification",
+                ],
+                "diff": "ADVANCED",
+                "time": "~15-20 MIN",
+                "is_unlocked": False,
+                "is_completed": False,
+            }
+        ]
+
+        self._chapter_card_rects = []
+        for idx, ch in enumerate(chapters):
+            cx = start_x + idx * (card_w + gap)
+            card_rect = pygame.Rect(cx, card_y, card_w, card_h)
+            self._chapter_card_rects.append(card_rect)
+
+            is_sel = (self.selected_chapter_idx == idx)
+            is_hover = card_rect.collidepoint(mx, my)
+
+            # Card Background
+            card_bg = (255, 255, 255) if ch["is_unlocked"] else (24, 34, 48)
+            border_col = (0, 140, 255) if (is_sel or is_hover) and ch["is_unlocked"] else ((65, 95, 135) if (is_sel or is_hover) else ((195, 215, 238) if ch["is_unlocked"] else (38, 52, 70)))
+            border_w = 2 if (is_sel or is_hover) else 1
+
+            pygame.draw.rect(surface, card_bg, card_rect, border_radius=10)
+            pygame.draw.rect(surface, border_col, card_rect, width=border_w, border_radius=10)
+
+            # Card Header Banner
+            banner_h = 42
+            banner_bg = (235, 244, 255) if ch["is_unlocked"] else (20, 28, 40)
+            pygame.draw.rect(surface, banner_bg, (card_rect.x, card_rect.y, card_rect.w, banner_h), border_top_left_radius=10, border_top_right_radius=10)
+            pygame.draw.line(surface, border_col, (card_rect.x, card_rect.y + banner_h), (card_rect.right, card_rect.y + banner_h), 1)
+
+            # Chapter Tag
+            tag_col = (0, 95, 200) if ch["is_unlocked"] else (130, 150, 175)
+            tag_s = self.font_guide_cmd.render(ch["tag"], True, tag_col)
+            surface.blit(tag_s, (card_rect.x + 14, card_rect.y + 11))
+
+            # Status Badge
+            if ch["is_completed"]:
+                b_text = "COMPLETED"
+                b_bg = (20, 165, 75)
+                b_tc = (255, 255, 255)
+            elif ch["is_unlocked"]:
+                b_text = "AVAILABLE"
+                b_bg = (0, 115, 230)
+                b_tc = (255, 255, 255)
+            else:
+                b_text = "COMING SOON"
+                b_bg = (40, 52, 68)
+                b_tc = (150, 170, 195)
+
+            b_surf = self.font_badge.render(b_text, True, b_tc)
+            bw = b_surf.get_width() + 14
+            b_rect = pygame.Rect(card_rect.right - bw - 12, card_rect.y + 9, bw, 24)
+            pygame.draw.rect(surface, b_bg, b_rect, border_radius=12)
+            surface.blit(b_surf, (b_rect.x + 7, b_rect.y + 4))
+
+            # Chapter Title
+            title_col = (10, 35, 75) if ch["is_unlocked"] else (200, 215, 235)
+            title_s = self.font_guide_dev_title.render(ch["name"], True, title_col)
+            surface.blit(title_s, (card_rect.x + 14, card_rect.y + 52))
+
+            # Subtitle (Thai)
+            sub_col = (0, 0, 0) if ch["is_unlocked"] else (135, 155, 180)
+            sub_s = self.font_thai_small.render(ch["desc_th"], True, sub_col)
+            surface.blit(sub_s, (card_rect.x + 14, card_rect.y + 76))
+
+            # Divider
+            div_y = card_rect.y + 100
+            div_col = (225, 235, 246) if ch["is_unlocked"] else (36, 48, 64)
+            pygame.draw.line(surface, div_col, (card_rect.x + 12, div_y), (card_rect.right - 12, div_y), 1)
+
+            # Highlights List
+            line_y = div_y + 12
+            for pil in ch["pillars"]:
+                p_col = (0, 0, 0) if ch["is_unlocked"] else (120, 140, 165)
+                pil_s = self.font_small.render(pil, True, p_col)
+                surface.blit(pil_s, (card_rect.x + 14, line_y))
+                line_y += 24
+
+            # Meta Info (Difficulty & Duration)
+            meta_y = card_rect.y + card_h - 96
+            pygame.draw.line(surface, div_col, (card_rect.x + 12, meta_y - 6), (card_rect.right - 12, meta_y - 6), 1)
+            diff_col = (0, 0, 0) if ch["is_unlocked"] else (130, 150, 175)
+            d_surf = self.font_small.render(f"Difficulty: {ch['diff']}   |   Est: {ch['time']}", True, diff_col)
+            surface.blit(d_surf, (card_rect.x + 14, meta_y))
+
+            # Action Button
+            btn_rect = pygame.Rect(card_rect.x + 14, card_rect.y + card_h - 54, card_rect.w - 28, 40)
+            if ch["is_unlocked"]:
+                btn_hov = btn_rect.collidepoint(mx, my) or is_sel
+                btn_bg = (0, 135, 255) if btn_hov else (0, 110, 225)
+                pygame.draw.rect(surface, btn_bg, btn_rect, border_radius=6)
+                btn_label = "[ REPLAY CHAPTER 1 ]" if ch["is_completed"] else "[ START CHAPTER 1 ]"
+                btn_s = self.font_btn.render(btn_label, True, (255, 255, 255))
+                surface.blit(btn_s, (btn_rect.x + (btn_rect.w - btn_s.get_width()) // 2, btn_rect.y + 10))
+            else:
+                pygame.draw.rect(surface, (32, 44, 58), btn_rect, border_radius=6)
+                pygame.draw.rect(surface, (45, 58, 75), btn_rect, width=1, border_radius=6)
+                btn_s = self.font_btn.render("[ LOCKED ]", True, (110, 130, 155))
+                surface.blit(btn_s, (btn_rect.x + (btn_rect.w - btn_s.get_width()) // 2, btn_rect.y + 10))
+
+        # 4. Bottom Hint Bar
+        bot_bar_h = 36
+        bot_y = screen_h - bot_bar_h
+        pygame.draw.rect(surface, (14, 22, 36), (0, bot_y, screen_w, bot_bar_h))
+        pygame.draw.line(surface, (35, 52, 75), (0, bot_y), (screen_w, bot_bar_h), 1)
+        hint_text = "[<] [>] Arrow Keys: Select Chapter   |   [ENTER] / Click: Launch Chapter 1   |   [ESC] Return to Main Menu"
+        hint_s = self.font_body.render(hint_text, True, (200, 220, 245))
+        surface.blit(hint_s, ((screen_w - hint_s.get_width()) // 2, bot_y + 8))
+
+    def _handle_tutorial_select_input(self, event, sound_mgr, screen_w, screen_h):
+        """Handles mouse & keyboard inputs on Chapter Select Screen."""
+        # 1. Mouse Motion
+        if event.type == pygame.MOUSEMOTION:
+            mx, my = event.pos
+            for idx, r in enumerate(self._chapter_card_rects):
+                if r.collidepoint(mx, my):
+                    if self.selected_chapter_idx != idx:
+                        self.selected_chapter_idx = idx
+                        sound_mgr.play_key()
+                    break
+
+        # 2. Mouse Click
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mx, my = event.pos
+            # Back Button
+            if self._tutorial_back_btn_rect and self._tutorial_back_btn_rect.collidepoint(mx, my):
+                sound_mgr.play_key()
+                self.state = MenuState.MAIN_MENU
+                return "TO_MAIN_MENU"
+
+            # Cards
+            for idx, r in enumerate(self._chapter_card_rects):
+                if r.collidepoint(mx, my):
+                    if idx == 0:
+                        sound_mgr.play_objective()
+                        self.state = MenuState.IN_GAME
+                        return "START_TUTORIAL:1"
+                    else:
+                        sound_mgr.play_key()
+                        self.selected_chapter_idx = idx
+                    return None
+
+        # 3. Keyboard
+        elif event.type == pygame.KEYDOWN:
+            if event.key in (pygame.K_LEFT, pygame.K_a):
+                self.selected_chapter_idx = max(0, self.selected_chapter_idx - 1)
+                sound_mgr.play_key()
+            elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                self.selected_chapter_idx = min(2, self.selected_chapter_idx + 1)
+                sound_mgr.play_key()
+            elif event.key in (pygame.K_1, pygame.K_KP1):
+                self.selected_chapter_idx = 0
+                sound_mgr.play_objective()
+                self.state = MenuState.IN_GAME
+                return "START_TUTORIAL:1"
+            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                if self.selected_chapter_idx == 0:
+                    sound_mgr.play_objective()
+                    self.state = MenuState.IN_GAME
+                    return "START_TUTORIAL:1"
+                else:
+                    sound_mgr.play_key()
+            elif event.key in (pygame.K_ESCAPE, pygame.K_m, pygame.K_BACKSPACE):
+                sound_mgr.play_key()
+                self.state = MenuState.MAIN_MENU
+                return "TO_MAIN_MENU"
+
+        return None
+
 
     def render(self, surface, screen_w, screen_h, devices=None, cables=None, mode=None):
         if self.state == MenuState.MAIN_MENU:
@@ -1261,6 +1624,8 @@ class MenuManager:
             self._render_pause_menu(surface, screen_w, screen_h)
         elif self.state == MenuState.TOPOLOGY_MAP:
             self.topology_2d.render(surface, screen_w, screen_h, devices, cables, mode)
+        elif self.state == MenuState.TUTORIAL_SELECT:
+            self._draw_tutorial_chapter_select(surface, screen_w, screen_h)
         elif self.state == MenuState.HELP_GUIDE:
             self._render_help_guide(surface, screen_w, screen_h)
         elif self.state == MenuState.DEVICE_MANAGER:
@@ -1332,7 +1697,7 @@ class MenuManager:
         surface.blit(logo_surf, (left_x, 75))
         surface.blit(sub_surf, (left_x, 126))
 
-        specs_text = self.font_small.render("Layer 2/3 Switching  *  STP 802.1D  *  OSPF/NAT  *  Cisco CLI", True, (95, 115, 140))
+        specs_text = self.font_small.render("Layer 2/3 Switching  *  STP 802.1D  *  OSPF/NAT  *  Cisco CLI", True, (0, 0, 0))
         surface.blit(specs_text, (left_x, 154))
 
         btn_w = self.get_main_menu_button_rect(0, w, h).width
@@ -1357,8 +1722,8 @@ class MenuManager:
             if is_hover:
                 pygame.draw.rect(surface, (0, 115, 230), (btn_rect.x, btn_rect.y, 5, btn_rect.h), border_top_left_radius=8, border_bottom_left_radius=8)
 
-            t_color = (0, 85, 200) if is_hover else (24, 36, 54)
-            d_color = (0, 105, 215) if is_hover else (90, 105, 125)
+            t_color = (0, 85, 200) if is_hover else (0, 0, 0)
+            d_color = (0, 105, 215) if is_hover else (0, 0, 0)
 
             t_surf = self.font_btn.render(f"[{i+1}] {title}", True, t_color)
             d_surf = self.font_body.render(desc, True, d_color)
@@ -1374,14 +1739,14 @@ class MenuManager:
             pygame.draw.rect(surface, (215, 228, 245), info_rect, width=1, border_radius=8)
 
             s1 = self.font_rack_micro.render("LIVE 3D ENGINE: 42U DUAL RACKS * CATENARY PHYSICS", True, (15, 135, 65))
-            s2 = self.font_small.render("Controls: [1]-[5] / [W][S] / Mouse Click  |  [F11] Fullscreen", True, (75, 95, 120))
-            s3 = self.font_small.render("Hardware: Real-Time 3D Cables & Blinking Status LEDs", True, (95, 110, 135))
+            s2 = self.font_small.render("Controls: [1]-[5] / [W][S] / Mouse Click  |  [F11] Fullscreen", True, (0, 0, 0))
+            s3 = self.font_small.render("Hardware: Real-Time 3D Cables & Blinking Status LEDs", True, (0, 0, 0))
             surface.blit(s1, (info_rect.x + 14, info_rect.y + 10))
             surface.blit(s2, (info_rect.x + 14, info_rect.y + 30))
             surface.blit(s3, (info_rect.x + 14, info_rect.y + 50))
 
         # Bottom hint
-        footer = self.font_small.render("Click buttons with MOUSE, or press [1]-[5] / [Up/Down] + [ENTER]", True, (110, 125, 145))
+        footer = self.font_small.render("Click buttons with MOUSE, or press [1]-[5] / [Up/Down] + [ENTER]", True, (0, 0, 0))
         surface.blit(footer, (left_x, h - 30))
 
     def _render_main_menu_racks(self, surface, w, h, now):
@@ -1648,7 +2013,7 @@ class MenuManager:
                 # HA Status LED (pulsing active)
                 ha_col = (20, 230, 80) if (math.sin(now * 3.0) > -0.7) else (10, 120, 40)
                 pygame.draw.circle(surface, ha_col, (ix1 + 110, dy + 9), 3)
-                ha_txt = self.font_rack_nano.render("HA: MASTER", True, (50, 70, 90))
+                ha_txt = self.font_rack_nano.render("HA: MASTER", True, (0, 0, 0))
                 surface.blit(ha_txt, (ix1 + 118, dy + 5))
 
                 # 12x GE Ports
@@ -1879,7 +2244,7 @@ class MenuManager:
                 # Silver lattice bezel
                 pygame.draw.rect(surface, (170, 180, 195), (ix2 + 4, dy + 4, iw - 8, 12), border_radius=1)
                 hpe_name = "HPE PROLIANT DL380 GEN10 #1" if stype == "server_san" else "HPE PROLIANT DL380 GEN10 #2"
-                lbl = self.font_rack_nano.render(hpe_name, True, (20, 30, 45))
+                lbl = self.font_rack_nano.render(hpe_name, True, (0, 0, 0))
                 surface.blit(lbl, (ix2 + 8, dy + 4))
 
                 # UID Blue Beacon LED (Classic 1-second blink)
@@ -2143,7 +2508,7 @@ class MenuManager:
             pygame.draw.rect(surface, (0, 115, 230), b_rect, width=1, border_radius=6)
 
             t_s = self.font_btn.render(title, True, (0, 85, 200))
-            h_s = self.font_mono.render(hotkey, True, (80, 105, 135))
+            h_s = self.font_mono.render(hotkey, True, (0, 0, 0))
             surface.blit(t_s, (b_rect.x + 16, b_rect.y + 10))
             surface.blit(h_s, (b_rect.right - h_s.get_width() - 16, b_rect.y + 12))
 
@@ -2212,7 +2577,7 @@ class MenuManager:
                     mid_x = (pos_a[0] + pos_b[0]) // 2
                     mid_y = (pos_a[1] + pos_b[1]) // 2
                     tag = f"{cable.port_a.name} <-> {cable.port_b.name}"
-                    t_s = self.font_mono.render(tag, True, (25, 40, 65))
+                    t_s = self.font_mono.render(tag, True, (0, 0, 0))
                     pygame.draw.rect(surface, (255, 255, 255), (mid_x - t_s.get_width()//2 - 4, mid_y - 10, t_s.get_width() + 8, 20), border_radius=4)
                     pygame.draw.rect(surface, (200, 215, 235), (mid_x - t_s.get_width()//2 - 4, mid_y - 10, t_s.get_width() + 8, 20), width=1, border_radius=4)
                     surface.blit(t_s, (mid_x - t_s.get_width()//2, mid_y - 8))
@@ -2243,12 +2608,12 @@ class MenuManager:
             pygame.draw.rect(surface, bg_color, rect, border_radius=8)
             pygame.draw.rect(surface, border_color, rect, width=2, border_radius=8)
 
-            d_name = self.font_btn.render(dev.hostname, True, (20, 35, 55))
+            d_name = self.font_btn.render(dev.hostname, True, (0, 0, 0))
             d_type = self.font_body.render(dev.device_type.upper(), True, border_color)
             surface.blit(d_name, (dx - d_name.get_width()//2, dy - 22))
             surface.blit(d_type, (dx - d_type.get_width()//2, dy + 4))
 
-        close_lbl = self.font_btn.render("Press [M] or [ESC] to return to Datacenter 3D view", True, (80, 105, 135))
+        close_lbl = self.font_btn.render("Press [M] or [ESC] to return to Datacenter 3D view", True, (0, 0, 0))
         surface.blit(close_lbl, (cx - close_lbl.get_width() // 2, h - 40))
 
     def _render_help_guide(self, surface, w, h):
@@ -2305,7 +2670,7 @@ class MenuManager:
             else:
                 pygame.draw.rect(surface, (255, 255, 255), t_rect, border_radius=6)
                 pygame.draw.rect(surface, (212, 224, 238), t_rect, width=1, border_radius=6)
-                t_col = (55, 75, 105)
+                t_col = (0, 0, 0)
 
             lbl = self.font_guide_tab.render(dev_info["label"], True, t_col)
             surface.blit(lbl, (t_rect.centerx - lbl.get_width() // 2, t_rect.centery - lbl.get_height() // 2))
@@ -2396,7 +2761,7 @@ class MenuManager:
             sy = specs_rect.y + 8 + (s_i % 2) * 40
             sx = specs_rect.x + 12 if s_i < 2 else sp_mid_x + 8
             k_lbl = self.font_guide_spec_k.render(k, True, (0, 102, 204))
-            v_lbl = self.font_guide_spec_v.render(val, True, (30, 48, 72))
+            v_lbl = self.font_guide_spec_v.render(val, True, (0, 0, 0))
             surface.blit(k_lbl, (sx, sy))
             surface.blit(v_lbl, (sx, sy + 17))
 
@@ -2417,7 +2782,7 @@ class MenuManager:
 
         for c_idx, c_name in enumerate(categories):
             is_active_cat = (c_idx == self.showcase_cat_idx)
-            pill_lbl = self.font_guide_cat.render(c_name, True, (255, 255, 255) if is_active_cat else (50, 75, 110))
+            pill_lbl = self.font_guide_cat.render(c_name, True, (255, 255, 255) if is_active_cat else (0, 0, 0))
             pill_w = pill_lbl.get_width() + 18
 
             # Wrap to next row if overflowing right boundary
@@ -2500,13 +2865,13 @@ class MenuManager:
 
             # Row 2: English Description (Enlarged)
             desc_en = cmd_item.get("desc", "")
-            desc_en_s = self.font_guide_desc.render(desc_en, True, (25, 42, 68))
+            desc_en_s = self.font_guide_desc.render(desc_en, True, (0, 0, 0))
             surface.blit(desc_en_s, (card_r.x + 12, card_r.y + 28))
 
             # Row 3: Thai Description (Enlarged, Native Thai font)
             desc_th = cmd_item.get("desc_th", "")
             if desc_th:
-                desc_th_s = self.font_thai_guide.render(desc_th, True, (45, 80, 125))
+                desc_th_s = self.font_thai_guide.render(desc_th, True, (0, 0, 0))
                 surface.blit(desc_th_s, (card_r.x + 12, card_r.y + 46))
 
             # Row 4: Practical Example Console Box
@@ -2553,7 +2918,7 @@ class MenuManager:
 
         # Bottom Controls Hint
         hint_text = "Shortcuts: [1-6] Select Device • [Drag Mouse] Rotate 360° • [Wheel / Up / Down] Scroll Cheatsheet"
-        hint_lbl = self.font_guide_hint.render(hint_text, True, (80, 105, 135))
+        hint_lbl = self.font_guide_hint.render(hint_text, True, (0, 0, 0))
         surface.blit(hint_lbl, (margin_x, footer_y + 6))
 
     def _render_device_manager(self, surface, w, h, mode):
@@ -2584,7 +2949,7 @@ class MenuManager:
         cls_r = rects["close_rect"]
         pygame.draw.rect(surface, (245, 248, 252), cls_r, border_radius=6)
         pygame.draw.rect(surface, (190, 205, 225), cls_r, width=1, border_radius=6)
-        x_lbl = self.font_btn.render("X", True, (70, 90, 120))
+        x_lbl = self.font_btn.render("X", True, (0, 0, 0))
         surface.blit(x_lbl, (cls_r.x + (cls_r.w - x_lbl.get_width())//2, cls_r.y + 5))
 
         # =========================================================================
@@ -2605,7 +2970,7 @@ class MenuManager:
             is_active = (self.dm_rack_filter == idx)
             bg = (0, 115, 230) if is_active else (244, 248, 253)
             border = (0, 115, 230) if is_active else (210, 222, 238)
-            tc = (255, 255, 255) if is_active else (50, 70, 95)
+            tc = (255, 255, 255) if is_active else (0, 0, 0)
 
             pygame.draw.rect(surface, bg, tab_r, border_radius=5)
             pygame.draw.rect(surface, border, tab_r, width=1, border_radius=5)
@@ -2624,7 +2989,10 @@ class MenuManager:
                 d for d in mode.devices
                 if self.dm_rack_filter == 0 or d.rack_id == self.dm_rack_filter
             ]
-            dev_list.sort(key=lambda d: (d.rack_id, -d.u_slot))
+            dev_list.sort(key=lambda d: (
+                int(d.rack_id) if getattr(d, 'rack_id', None) is not None else 0,
+                -(int(d.u_slot) if getattr(d, 'u_slot', None) is not None else 0)
+            ))
 
         # Set up clipping for scrolling list
         prev_clip = surface.get_clip()
@@ -2661,7 +3029,7 @@ class MenuManager:
                 badge_text = "ISP WAN"
             elif dev.device_type == "server":
                 badge_bg = (242, 244, 248)
-                badge_tc = (65, 75, 95)
+                badge_tc = (0, 0, 0)
                 badge_text = "SERVER"
 
             badge_r = pygame.Rect(row_r.x + 10, row_r.y + 8, 62, 20)
@@ -2670,15 +3038,20 @@ class MenuManager:
             surface.blit(b_s, (badge_r.x + (badge_r.w - b_s.get_width())//2, badge_r.y + 2))
 
             # Hostname
-            h_s = self.font_bold.render(dev.hostname, True, (20, 35, 55))
+            h_s = self.font_bold.render(dev.hostname, True, (0, 0, 0))
             surface.blit(h_s, (row_r.x + 80, row_r.y + 8))
 
             # Location & Port info
             span = 1 if dev.device_type in ("switch", "firewall", "isp_gateway", "isp") else 2
-            loc_str = f"RACK-0{dev.rack_id} (Slot {dev.u_slot}U" + (f"-{dev.u_slot+1}U" if span > 1 else "U") + ")"
+            r_id = getattr(dev, "rack_id", 0) or 0
+            u_s = getattr(dev, "u_slot", 0) or 0
+            if r_id > 0 and u_s > 0:
+                loc_str = f"RACK-0{r_id} (Slot {u_s}U" + (f"-{u_s+1}U" if span > 1 else "U") + ")"
+            else:
+                loc_str = "NOC Workbench / Desk"
             active_links = sum(1 for p in dev.ports.values() if p.cable)
             port_str = f"Ports: {len(dev.ports)} ({active_links} cabled)"
-            sub_s = self.font_small.render(f"{loc_str}  |  {port_str}", True, (90, 105, 125))
+            sub_s = self.font_small.render(f"{loc_str}  |  {port_str}", True, (0, 0, 0))
             surface.blit(sub_s, (row_r.x + 12, row_r.y + 32))
 
             # [Remove] Button
@@ -2689,7 +3062,7 @@ class MenuManager:
             surface.blit(rem_lbl, (rem_btn.x + (rem_btn.w - rem_lbl.get_width())//2, rem_btn.y + 6))
 
         if len(dev_list) == 0:
-            no_dev = self.font_body.render("No equipment currently installed in this selection.", True, (120, 135, 155))
+            no_dev = self.font_body.render("No equipment currently installed in this selection.", True, (0, 0, 0))
             surface.blit(no_dev, (list_r.x + 20, list_r.y + 30))
 
         surface.set_clip(prev_clip)
@@ -2706,7 +3079,7 @@ class MenuManager:
         surface.blit(h_right, (right_r.x + 14, right_r.y + 10))
 
         # 1. Device Type
-        lbl_type = self.font_small.render("1. SELECT HARDWARE TYPE:", True, (70, 90, 120))
+        lbl_type = self.font_small.render("1. SELECT HARDWARE TYPE:", True, (0, 0, 0))
         surface.blit(lbl_type, (right_r.x + 14, right_r.y + 34))
 
         type_labels = {
@@ -2719,14 +3092,14 @@ class MenuManager:
             is_active = (self.dm_selected_type == t_name)
             bg = (235, 245, 255) if is_active else (250, 252, 255)
             border = (0, 115, 230) if is_active else (215, 225, 240)
-            tc = (0, 95, 210) if is_active else (60, 75, 95)
+            tc = (0, 95, 210) if is_active else (0, 0, 0)
             pygame.draw.rect(surface, bg, t_rect, border_radius=5)
             pygame.draw.rect(surface, border, t_rect, width=2 if is_active else 1, border_radius=5)
             lbl = self.font_small.render(type_labels[t_name], True, tc)
             surface.blit(lbl, (t_rect.x + (t_rect.w - lbl.get_width())//2, t_rect.y + 9))
 
         # 2. Target Rack
-        lbl_rack = self.font_small.render("2. DESTINATION 42U RACK:", True, (70, 90, 120))
+        lbl_rack = self.font_small.render("2. DESTINATION 42U RACK:", True, (0, 0, 0))
         surface.blit(lbl_rack, (right_r.x + 14, right_r.y + 102))
 
         rack_labels = {1: "Rack 1 (A01)", 2: "Rack 2 (A02)", 3: "Rack 3 (A03)"}
@@ -2734,14 +3107,14 @@ class MenuManager:
             is_active = (self.dm_selected_rack == r_id)
             bg = (235, 245, 255) if is_active else (250, 252, 255)
             border = (0, 115, 230) if is_active else (215, 225, 240)
-            tc = (0, 95, 210) if is_active else (60, 75, 95)
+            tc = (0, 95, 210) if is_active else (0, 0, 0)
             pygame.draw.rect(surface, bg, r_rect, border_radius=5)
             pygame.draw.rect(surface, border, r_rect, width=2 if is_active else 1, border_radius=5)
             lbl = self.font_small.render(rack_labels[r_id], True, tc)
             surface.blit(lbl, (r_rect.x + (r_rect.w - lbl.get_width())//2, r_rect.y + 8))
 
         # 3. U-Slot Stepper
-        lbl_slot = self.font_small.render("3. RACK MOUNTING SLOT (1U - 42U):", True, (70, 90, 120))
+        lbl_slot = self.font_small.render("3. RACK MOUNTING SLOT (1U - 42U):", True, (0, 0, 0))
         surface.blit(lbl_slot, (right_r.x + 14, right_r.y + 168))
 
         # [-] button
@@ -2757,7 +3130,7 @@ class MenuManager:
         pygame.draw.rect(surface, (200, 215, 235), sd_r, width=1, border_radius=5)
         needed_span = 1 if self.dm_selected_type in ("switch", "firewall") else 2
         slot_text = f"Unit Slot: {self.dm_selected_slot}U" + (f" - {self.dm_selected_slot+1}U" if needed_span > 1 else "")
-        sd_s = self.font_bold.render(slot_text, True, (20, 35, 55))
+        sd_s = self.font_bold.render(slot_text, True, (0, 0, 0))
         surface.blit(sd_s, (sd_r.x + (sd_r.w - sd_s.get_width())//2, sd_r.y + 8))
 
         # [+] button
@@ -2782,7 +3155,7 @@ class MenuManager:
         surface.blit(st_lbl, (status_box_r.x + 10, status_box_r.y + 4))
 
         # 4. Hostname Input Field
-        lbl_host = self.font_small.render("4. DEVICE HOSTNAME:", True, (70, 90, 120))
+        lbl_host = self.font_small.render("4. DEVICE HOSTNAME:", True, (0, 0, 0))
         surface.blit(lbl_host, (right_r.x + 14, right_r.y + 258))
 
         h_rect = rects["hostname_rect"]
@@ -2792,18 +3165,18 @@ class MenuManager:
         pygame.draw.rect(surface, h_border, h_rect, width=2 if self.dm_hostname_active else 1, border_radius=5)
 
         cursor_str = "|" if (self.dm_hostname_active and (pygame.time.get_ticks() // 400) % 2 == 0) else ""
-        h_val = self.font_mono.render(self.dm_hostname_input + cursor_str, True, (20, 35, 55))
+        h_val = self.font_mono.render(self.dm_hostname_input + cursor_str, True, (0, 0, 0))
         surface.blit(h_val, (h_rect.x + 10, h_rect.y + 8))
 
         # Helper hint
-        hint_s = self.font_small.render("Click box to edit name, [ENTER] when done", True, (130, 145, 165))
+        hint_s = self.font_small.render("Click box to edit name, [ENTER] when done", True, (0, 0, 0))
         surface.blit(hint_s, (h_rect.x, h_rect.bottom + 4))
 
         # 5. Big Install Button
         inst_r = rects["install_btn_rect"]
         can_install = not is_occ
         inst_bg = (0, 115, 230) if can_install else (220, 228, 238)
-        inst_tc = (255, 255, 255) if can_install else (140, 155, 175)
+        inst_tc = (255, 255, 255) if can_install else (0, 0, 0)
 
         # Shadow
         if can_install:

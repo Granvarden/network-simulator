@@ -55,7 +55,7 @@ class TerminalUI:
         self.COLOR_BG = (252, 253, 255, 248)        # Clean off-white surface
         self.COLOR_HEADER = (235, 242, 252)          # Soft ice-blue title bar
         self.COLOR_BORDER = (0, 115, 230)            # Crisp enterprise blue accent
-        self.COLOR_TEXT = (25, 35, 50)               # Deep crisp charcoal
+        self.COLOR_TEXT = (0, 0, 0)                  # Pure high-contrast black
         self.COLOR_PROMPT = (10, 125, 60)            # Deep emerald green
         self.COLOR_TITLE = (15, 45, 90)              # Navy blue title
         self.COLOR_CURSOR = (0, 110, 220)            # Blue caret
@@ -425,7 +425,7 @@ class TerminalUI:
         self.close_btn_rect = pygame.Rect(w - 30, 4, 24, 24)
         pygame.draw.rect(self.surface, (238, 242, 250), self.close_btn_rect, border_radius=4)
         pygame.draw.rect(self.surface, (180, 205, 238), self.close_btn_rect, width=1, border_radius=4)
-        x_surf = self.title_font.render("X", True, (100, 130, 170))
+        x_surf = self.title_font.render("X", True, (0, 0, 0))
         self.surface.blit(x_surf, (w - 23, 7))
 
         # Terminal Content Area

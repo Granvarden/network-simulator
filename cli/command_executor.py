@@ -3,7 +3,7 @@ cli/command_executor.py - Cisco IOS Command Handlers & State Machine
 Implements Cisco IOS command behaviors, output tables, and config state changes.
 """
 
-from network.router import Router, SubInterface, is_valid_ipv4, is_valid_netmask
+from network.router import Router, SubInterface, is_valid_ipv4, is_valid_netmask, ip_to_int
 from network.switch import Switch, SVI
 from network.host import Host
 from network.firewall import Firewall
@@ -17,6 +17,7 @@ class IOSMode:
     CONFIG_SUBIF = "CONFIG_SUBIF"   # Router(config-subif)#
     CONFIG_VLAN = "CONFIG_VLAN"     # Switch(config-vlan)#
     CONFIG_DHCP_POOL = "CONFIG_DHCP_POOL" # Switch(dhcp-config)#
+    CONFIG_ROUTER = "CONFIG_ROUTER"       # Router(config-router)#
 
 class CommandExecutor:
     def __init__(self, device):
@@ -25,6 +26,7 @@ class CommandExecutor:
         self.current_interface = None
         self.current_vlan_id = None
         self.current_dhcp_pool = None
+        self.current_router_protocol = None
         self.saved_config = ""
         self.packet_engine = PacketEngine.get_instance()
 
@@ -46,6 +48,8 @@ class CommandExecutor:
             return f"{h}(config-vlan)#{self.current_vlan_id}#"
         elif self.mode == IOSMode.CONFIG_DHCP_POOL:
             return f"{h}(dhcp-config)#"
+        elif self.mode == IOSMode.CONFIG_ROUTER:
+            return f"{h}(config-router)#"
         return f"{h}#"
 
     def execute(self, line):
@@ -71,6 +75,7 @@ class CommandExecutor:
             self.current_interface = None
             self.current_vlan_id = None
             self.current_dhcp_pool = None
+            self.current_router_protocol = None
             return ""
 
         if self.mode == IOSMode.USER:
@@ -85,15 +90,18 @@ class CommandExecutor:
             return self._exec_config_vlan(tokens)
         elif self.mode == IOSMode.CONFIG_DHCP_POOL:
             return self._exec_config_dhcp(tokens)
+        elif self.mode == IOSMode.CONFIG_ROUTER:
+            return self._exec_config_router(tokens)
 
         return "% Invalid input detected at '^' marker."
 
     def _handle_exit(self):
-        if self.mode in (IOSMode.CONFIG_IF, IOSMode.CONFIG_SUBIF, IOSMode.CONFIG_VLAN, IOSMode.CONFIG_DHCP_POOL):
+        if self.mode in (IOSMode.CONFIG_IF, IOSMode.CONFIG_SUBIF, IOSMode.CONFIG_VLAN, IOSMode.CONFIG_DHCP_POOL, IOSMode.CONFIG_ROUTER):
             self.mode = IOSMode.CONFIG
             self.current_interface = None
             self.current_vlan_id = None
             self.current_dhcp_pool = None
+            self.current_router_protocol = None
             return ""
         elif self.mode == IOSMode.CONFIG:
             self.mode = IOSMode.PRIVILEGED
@@ -106,37 +114,11 @@ class CommandExecutor:
         return ""
 
     def _handle_help(self, cmd):
-        from .command_parser import COMMAND_HELP
-        clean = cmd.strip().lower().rstrip("?").strip()
-
-        if clean in ("show", "sh"):
-            return (
-                "Show commands:\n"
-                "  ip interface brief    Brief summary of interface IP and status\n"
-                "  running-config        Current operating configuration\n"
-                "  ip route              IP routing table (Routers/Firewall)\n"
-                "  ip nat translations   Active NAT/PAT translations (Routers)\n"
-                "  ip nat statistics     NAT translation statistics (Routers)\n"
-                "  access-list           Access Control Lists (Routers/Firewall)\n"
-                "  nameif                Interface security zones (Firewall)\n"
-                "  conn                  Stateful active connections (Firewall)\n"
-                "  vlan brief            VLAN status and ports (Switches)\n"
-                "  mac address-table     MAC forwarding table (Switches)"
-            )
-
-        if clean in ("int", "interface"):
-            ports = list(self.device.ports.keys())
-            if isinstance(self.device, Router):
-                ports.extend(list(self.device.subinterfaces.keys()))
-            return "Interfaces available on this device:\n  " + "  ".join(ports)
-
-        # Mode-level help table
-        items = COMMAND_HELP.get(self.mode, [])
-        lines = [f"Available Cisco IOS commands ({self.mode} mode):"]
-        lines.append("-" * 75)
-        for c_name, c_desc in items:
-            lines.append(f"  {c_name:<34} {c_desc}")
-        return "\n".join(lines)
+        from .command_parser import CommandParser
+        parser = getattr(self, "parser", None)
+        if parser is None:
+            parser = CommandParser(self)
+        return parser.get_help(cmd)
 
     def _exec_user(self, tokens):
         v = tokens[0].lower()
@@ -349,16 +331,22 @@ class CommandExecutor:
             return ""
 
         # no ip route <net> <mask4> [gw]
-        if v == "no" and len(tokens) >= 5 and tokens[1].lower() == "ip" and tokens[2].lower() == "route" and isinstance(self.device, (Router, Firewall)):
+        if v == "no" and len(tokens) >= 3 and tokens[1].lower() == "ip" and tokens[2].lower() == "route" and isinstance(self.device, (Router, Firewall)):
+            if len(tokens) < 5:
+                return "% Incomplete command."
             net, mask = tokens[3], tokens[4]
             gw = tokens[5] if len(tokens) > 5 else None
             self.device.remove_static_route(net, mask, gw)
             return ""
 
         # ip route <net> <mask4> <gw>
-        if v == "ip" and len(tokens) >= 5 and tokens[1].lower() == "route" and isinstance(self.device, (Router, Firewall)):
+        if v == "ip" and len(tokens) >= 2 and tokens[1].lower() == "route" and isinstance(self.device, (Router, Firewall)):
+            if len(tokens) < 5:
+                return "% Incomplete command."
             net, mask, nexthop = tokens[2], tokens[3], tokens[4]
-            self.device.add_static_route(net, mask, nexthop)
+            ok = self.device.add_static_route(net, mask, nexthop)
+            if not ok:
+                return "% Invalid prefix or next-hop address"
             return ""
 
         # ip nat inside source list <acl> interface <if> overload
@@ -371,12 +359,120 @@ class CommandExecutor:
                 self.device.add_nat_rule("overload" if is_overload else "static", acl_id, out_if)
                 return ""
 
+        # router rip
+        if v == "router" and len(tokens) >= 2 and tokens[1].lower() == "rip" and isinstance(self.device, Router):
+            self.device.enable_rip()
+            self.mode = IOSMode.CONFIG_ROUTER
+            self.current_router_protocol = "rip"
+            return ""
+
+        # no router rip
+        if v == "no" and len(tokens) >= 3 and tokens[1].lower() == "router" and tokens[2].lower() == "rip" and isinstance(self.device, Router):
+            self.device.disable_rip()
+            if self.mode == IOSMode.CONFIG_ROUTER and self.current_router_protocol == "rip":
+                self.mode = IOSMode.CONFIG
+                self.current_router_protocol = None
+            return ""
+
+        # router ospf <process-id>
+        if v == "router" and len(tokens) >= 3 and tokens[1].lower() == "ospf" and isinstance(self.device, Router):
+            try:
+                proc_id = int(tokens[2])
+            except ValueError:
+                proc_id = tokens[2]
+            self.device.enable_ospf(process_id=proc_id)
+            self.mode = IOSMode.CONFIG_ROUTER
+            self.current_router_protocol = "ospf"
+            return ""
+
+        # no router ospf [process-id]
+        if v == "no" and len(tokens) >= 3 and tokens[1].lower() == "router" and tokens[2].lower() == "ospf" and isinstance(self.device, Router):
+            self.device.disable_ospf()
+            if self.mode == IOSMode.CONFIG_ROUTER and self.current_router_protocol == "ospf":
+                self.mode = IOSMode.CONFIG
+                self.current_router_protocol = None
+            return ""
+
         if v in ("do",):
             # Execute privileged command in config mode
             return self._exec_privileged(tokens[1:])
         if v in ("show", "sh"):
             return self._cmd_show(tokens[1:])
         return "% Invalid configuration command."
+
+    def _exec_config_router(self, tokens):
+        if not self.current_router_protocol or not isinstance(self.device, Router):
+            self.mode = IOSMode.CONFIG
+            return ""
+
+        v = tokens[0].lower()
+        if v in ("exit", "end"):
+            self.mode = IOSMode.CONFIG if v == "exit" else IOSMode.PRIVILEGED
+            self.current_router_protocol = None
+            return ""
+
+        if v in ("do",):
+            return self._exec_privileged(tokens[1:])
+        if v in ("show", "sh"):
+            return self._cmd_show(tokens[1:])
+
+        if self.current_router_protocol == "rip":
+            if v == "version" and len(tokens) >= 2:
+                try:
+                    ver = int(tokens[1])
+                    if ver in (1, 2):
+                        self.device.rip_version = ver
+                        return ""
+                    return "% Invalid version (only version 2 supported)"
+                except ValueError:
+                    return "% Invalid version number"
+
+            if v == "network" and len(tokens) >= 2:
+                net = tokens[1].strip()
+                ok = self.device.add_rip_network(net)
+                if not ok:
+                    return "% Invalid network address"
+                return ""
+
+            if v == "no" and len(tokens) >= 3 and tokens[1].lower() == "network":
+                net = tokens[2].strip()
+                self.device.remove_rip_network(net)
+                return ""
+
+        elif self.current_router_protocol == "ospf":
+            # router-id <ip>
+            if v == "router-id" and len(tokens) >= 2:
+                rid = tokens[1].strip()
+                ok = self.device.set_ospf_router_id(rid)
+                if not ok:
+                    return "% Invalid router ID format."
+                return ""
+
+            # network <net> <wildcard> area 0
+            if v == "network" and len(tokens) >= 5 and tokens[3].lower() == "area":
+                net = tokens[1].strip()
+                wc = tokens[2].strip()
+                try:
+                    area = int(tokens[4].strip())
+                except ValueError:
+                    return "% Invalid area ID."
+                ok = self.device.add_ospf_network(net, wc, area=area)
+                if not ok:
+                    return "% Invalid OSPF network statement."
+                return ""
+
+            # no network <net> <wildcard> area 0
+            if v == "no" and len(tokens) >= 6 and tokens[1].lower() == "network" and tokens[4].lower() == "area":
+                net = tokens[2].strip()
+                wc = tokens[3].strip()
+                try:
+                    area = int(tokens[5].strip())
+                except ValueError:
+                    return "% Invalid area ID."
+                self.device.remove_ospf_network(net, wc, area=area)
+                return ""
+
+        return "% Invalid router configuration command."
 
     def _exec_config_dhcp(self, tokens):
         if not self.current_dhcp_pool:
@@ -576,6 +672,25 @@ class CommandExecutor:
                 self.device.nat_outside_interfaces.discard(self.current_interface.name)
                 return ""
 
+        # ip ospf cost <value> (Router)
+        if tokens[0].lower() == "ip" and len(tokens) >= 4 and tokens[1].lower() == "ospf" and tokens[2].lower() == "cost" and isinstance(self.device, Router):
+            try:
+                c = int(tokens[3])
+                if c < 1 or c > 65535:
+                    return "% Cost must be between 1 and 65535"
+                self.current_interface.ospf_cost = c
+                if getattr(self.device, "ospf_enabled", False):
+                    self.device.ospf.trigger_convergence()
+                return ""
+            except ValueError:
+                return "% Invalid cost value."
+
+        if len(tokens) >= 4 and tokens[0].lower() == "no" and tokens[1].lower() == "ip" and tokens[2].lower() == "ospf" and tokens[3].lower() == "cost" and isinstance(self.device, Router):
+            self.current_interface.ospf_cost = 1
+            if getattr(self.device, "ospf_enabled", False):
+                self.device.ospf.trigger_convergence()
+            return ""
+
         # nameif <zone> (Firewall)
         if tokens[0].lower() == "nameif" and len(tokens) > 1 and isinstance(self.device, Firewall):
             zone = tokens[1].lower()
@@ -597,29 +712,99 @@ class CommandExecutor:
                 except ValueError:
                     return "% Invalid VLAN ID"
 
+        # no switchport commands
+        if tokens[0].lower() == "no" and len(tokens) >= 2 and tokens[1].lower() in ("switchport", "sw"):
+            # no switchport trunk allowed vlan
+            if len(tokens) >= 5 and tokens[2].lower() == "trunk" and tokens[3].lower() == "allowed" and tokens[4].lower() == "vlan":
+                self.current_interface.trunk_allowed_vlans = {1}
+                native_vid = getattr(self.current_interface, "native_vlan", 1)
+                if native_vid != 1:
+                    self.current_interface.trunk_allowed_vlans.add(native_vid)
+                return ""
+            # no switchport trunk native vlan
+            if len(tokens) >= 5 and tokens[2].lower() == "trunk" and tokens[3].lower() == "native" and tokens[4].lower() == "vlan":
+                self.current_interface.native_vlan = 1
+                if hasattr(self.current_interface, "trunk_allowed_vlans"):
+                    self.current_interface.trunk_allowed_vlans.add(1)
+                return ""
+            # no switchport access vlan
+            if len(tokens) >= 4 and tokens[2].lower() == "access" and tokens[3].lower() == "vlan":
+                self.current_interface.access_vlan = 1
+                return ""
+            # no switchport mode
+            if len(tokens) >= 3 and tokens[2].lower() == "mode":
+                self.current_interface.mode = "access"
+                return ""
+
         # Switchport commands
         if tokens[0].lower() in ("switchport", "sw"):
+            # switchport mode access / trunk
             if len(tokens) >= 3 and tokens[1].lower() == "mode":
                 mode = tokens[2].lower()
                 if mode in ("access", "trunk"):
                     self.current_interface.mode = mode
                     return ""
+                return "% Invalid switchport mode. Use 'access' or 'trunk'."
+
+            # switchport access vlan <id>
             if len(tokens) >= 4 and tokens[1].lower() == "access" and tokens[2].lower() == "vlan":
                 try:
                     vid = int(tokens[3])
+                    if vid < 1 or vid > 4094:
+                        return "% Invalid VLAN number (1-4094)"
                     self.current_interface.access_vlan = vid
                     return ""
                 except ValueError:
                     return "% Invalid VLAN number"
-            if len(tokens) >= 5 and tokens[1].lower() == "trunk" and tokens[2].lower() == "allowed":
-                # allowed vlan 10,20
-                vlan_str = tokens[4]
-                try:
-                    vlans = {int(x) for x in vlan_str.replace(",", " ").split()}
-                    self.current_interface.trunk_allowed_vlans = vlans
+
+            # switchport trunk allowed vlan ...
+            if len(tokens) >= 5 and tokens[1].lower() == "trunk" and tokens[2].lower() == "allowed" and tokens[3].lower() == "vlan":
+                from network.switch import parse_vlan_ranges
+                arg_idx = 4
+                action = None
+                if tokens[4].lower() in ("add", "remove", "except", "all"):
+                    action = tokens[4].lower()
+                    arg_idx = 5
+
+                if action == "all":
+                    self.current_interface.trunk_allowed_vlans = set(range(1, 4095))
                     return ""
-                except Exception:
-                    return "% Error parsing VLAN list"
+
+                if arg_idx >= len(tokens):
+                    return "% Incomplete allowed VLAN command."
+
+                vlan_str = " ".join(tokens[arg_idx:])
+                try:
+                    parsed_vlans = parse_vlan_ranges(vlan_str)
+                except ValueError as e:
+                    return f"% Error parsing VLAN list: {e}"
+
+                if not parsed_vlans:
+                    return "% Error parsing VLAN list: empty set"
+
+                current_set = set(getattr(self.current_interface, "trunk_allowed_vlans", {1}))
+                if action == "add":
+                    new_set = current_set | parsed_vlans
+                elif action == "remove":
+                    new_set = current_set - parsed_vlans
+                elif action == "except":
+                    new_set = set(range(1, 4095)) - parsed_vlans
+                else:
+                    new_set = parsed_vlans
+
+                self.current_interface.trunk_allowed_vlans = new_set
+                return ""
+
+            # switchport trunk native vlan <id>
+            if len(tokens) >= 5 and tokens[1].lower() == "trunk" and tokens[2].lower() == "native" and tokens[3].lower() == "vlan":
+                try:
+                    vid = int(tokens[4])
+                    if vid < 1 or vid > 4094:
+                        return "% Invalid VLAN number (1-4094)"
+                    self.current_interface.native_vlan = vid
+                    return ""
+                except ValueError:
+                    return "% Invalid VLAN number"
 
         if tokens[0].lower() == "do":
             return self._exec_privileged(tokens[1:])
@@ -778,6 +963,26 @@ class CommandExecutor:
         if (sub in ("ip route", "ip ro", "route") or sub.startswith("ip route")) and isinstance(self.device, (Router, Firewall)):
             return self._show_ip_route()
 
+        # show ip ospf neighbor / show ospf neighbor
+        if ("ospf" in sub and "neigh" in sub) and isinstance(self.device, Router):
+            return self._show_ip_ospf_neighbor()
+
+        # show ip ospf database / show ospf database
+        if ("ospf" in sub and ("data" in sub or "db" in sub)) and isinstance(self.device, Router):
+            return self._show_ip_ospf_database()
+
+        # show ip ospf / show ospf
+        if (sub in ("ip ospf", "ospf") or sub.startswith("ip ospf")) and isinstance(self.device, Router):
+            return self._show_ip_ospf()
+
+        # show ip rip / show rip
+        if sub in ("ip rip", "rip") and isinstance(self.device, Router):
+            return self._show_ip_rip()
+
+        # show ip protocols / show protocols
+        if sub in ("ip protocols", "ip protocol", "protocols", "protocol") and isinstance(self.device, Router):
+            return self._show_ip_protocols()
+
         # show ip nat translations
         if ("nat" in sub and "trans" in sub) and isinstance(self.device, Router):
             return self._show_ip_nat_translations()
@@ -919,6 +1124,19 @@ class CommandExecutor:
 
     def _show_interface(self, args):
         tokens = [x.lower() for x in args]
+        # Check 'show interfaces trunk' or 'show int trunk'
+        if len(tokens) >= 2 and tokens[1] in ("trunk", "trunks"):
+            return self._show_interfaces_trunk()
+        # Check 'show interfaces switchport' or 'show int switchport'
+        if len(tokens) >= 2 and tokens[1] in ("switchport", "switchports"):
+            return self._show_interfaces_switchport()
+        # Check 'show interfaces <port> switchport'
+        if len(tokens) >= 3 and tokens[2] in ("switchport", "switchports"):
+            return self._show_interfaces_switchport(tokens[1])
+        # Check 'show interfaces <port> trunk'
+        if len(tokens) >= 3 and tokens[2] in ("trunk", "trunks"):
+            return self._show_interfaces_trunk(tokens[1])
+
         target_name = None
         if len(tokens) >= 3 and tokens[1] == "vlan":
             target_name = f"Vlan{tokens[2]}"
@@ -951,6 +1169,125 @@ class CommandExecutor:
                 return "\n".join(lines)
             return f"% Interface {target_name} does not exist"
         return self._show_ip_int_brief()
+
+    def _show_interfaces_switchport(self, port_name=None):
+        if not isinstance(self.device, Switch):
+            return "% Switchport command only supported on switches."
+        from network.switch import format_vlan_ranges
+        if self.device.stp_enabled:
+            self.device.recalculate_stp()
+
+        ports = []
+        if port_name:
+            p = self.device.get_port(port_name)
+            if not p:
+                return f"% Interface {port_name} does not exist"
+            ports = [p]
+        else:
+            ports = [p for p in self.device.ports.values() if p.port_type != "CONSOLE"]
+
+        lines = []
+        for p in ports:
+            stp_st = getattr(p, "stp_state", "Forwarding")
+            if p.mode == "trunk":
+                allowed_str = format_vlan_ranges(p.trunk_allowed_vlans)
+                lines.extend([
+                    f"Port: {p.name}",
+                    f"Name: {p.name}",
+                    f"Switchport: Enabled",
+                    f"Mode: trunk",
+                    f"Administrative Mode: trunk",
+                    f"Operational Mode: trunk",
+                    f"Administrative Trunking Encapsulation: dot1q",
+                    f"Operational Trunking Encapsulation: dot1q",
+                    f"Negotiation of Trunking: Off",
+                    f"Access Mode VLAN: {p.access_vlan} (default)",
+                    f"Native VLAN: {p.native_vlan}",
+                    f"Trunking Native Mode VLAN: {p.native_vlan}",
+                    f"Administrative Native VLAN tagging: disabled",
+                    f"Allowed VLANs: {allowed_str}",
+                    f"Trunking VLANs Enabled: {allowed_str}",
+                    f"Pruning VLANs Enabled: None",
+                    f"Operational VLANs: {allowed_str}",
+                    f"STP State: {stp_st}",
+                    ""
+                ])
+            else:
+                lines.extend([
+                    f"Port: {p.name}",
+                    f"Name: {p.name}",
+                    f"Switchport: Enabled",
+                    f"Mode: access",
+                    f"Administrative Mode: static access",
+                    f"Operational Mode: static access",
+                    f"Administrative Trunking Encapsulation: native",
+                    f"Operational Trunking Encapsulation: native",
+                    f"Negotiation of Trunking: Off",
+                    f"Access VLAN: {p.access_vlan}",
+                    f"Access Mode VLAN: {p.access_vlan}",
+                    f"Native VLAN: {p.native_vlan}",
+                    f"Trunking Native Mode VLAN: {p.native_vlan} (default)",
+                    f"Administrative Native VLAN tagging: disabled",
+                    f"Trunking VLANs Enabled: ALL",
+                    f"Pruning VLANs Enabled: None",
+                    f"Operational VLANs: {p.access_vlan}",
+                    f"STP State: {stp_st}",
+                    ""
+                ])
+        return "\n".join(lines).strip()
+
+    def _show_interfaces_trunk(self, port_name=None):
+        if not isinstance(self.device, Switch):
+            return "% Trunk command only supported on switches."
+        from network.switch import format_vlan_ranges
+        if self.device.stp_enabled:
+            self.device.recalculate_stp()
+
+        ports = []
+        if port_name:
+            p = self.device.get_port(port_name)
+            if not p:
+                return f"% Interface {port_name} does not exist"
+            if p.mode == "trunk":
+                ports = [p]
+        else:
+            ports = [p for p in self.device.ports.values() if p.mode == "trunk" and p.port_type != "CONSOLE"]
+
+        if not ports:
+            return ""
+
+        lines = [
+            f"{'Port':<12}{'Mode':<18}{'Encapsulation':<16}{'Status':<14}{'Native vlan'}",
+            "-" * 68
+        ]
+        for p in ports:
+            status = "trunking" if p.is_link_up else "not-trunking"
+            lines.append(f"{p.name:<12}{'on':<18}{'802.1q':<16}{status:<14}{p.native_vlan}")
+
+        lines.append("")
+        lines.append(f"{'Port':<12}{'Vlans allowed on trunk'}")
+        lines.append("-" * 40)
+        for p in ports:
+            lines.append(f"{p.name:<12}{format_vlan_ranges(p.trunk_allowed_vlans)}")
+
+        lines.append("")
+        lines.append(f"{'Port':<12}{'Vlans allowed and active in management domain'}")
+        lines.append("-" * 40)
+        for p in ports:
+            active_vlans = {v for v in p.trunk_allowed_vlans if v in self.device.vlans}
+            lines.append(f"{p.name:<12}{format_vlan_ranges(active_vlans)}")
+
+        lines.append("")
+        lines.append(f"{'Port':<12}{'Vlans in spanning tree forwarding state and not pruned'}")
+        lines.append("-" * 40)
+        for p in ports:
+            if getattr(p, "stp_state", "Forwarding") == "Forwarding":
+                active_vlans = {v for v in p.trunk_allowed_vlans if v in self.device.vlans}
+                lines.append(f"{p.name:<12}{format_vlan_ranges(active_vlans)}")
+            else:
+                lines.append(f"{p.name:<12}none")
+
+        return "\n".join(lines).strip()
 
     def _show_ip_int_brief(self):
         lines = [
@@ -1065,23 +1402,188 @@ class CommandExecutor:
         return "\n".join(lines)
 
     def _show_ip_route(self):
+        routes = self.device.get_all_routes() if hasattr(self.device, "get_all_routes") else []
+        default_gw = None
+        for r in routes:
+            if r.get("network") == "0.0.0.0" and r.get("mask") in ("0.0.0.0", "0"):
+                default_gw = r.get("next_hop") or r.get("interface")
+                break
+
+        gw_line = f"Gateway of last resort is {default_gw} to network 0.0.0.0" if default_gw else "Gateway of last resort is not set"
         lines = [
-            "Codes: C - connected, S - static, R - RIP, O - OSPF",
-            "Gateway of last resort is not set",
+            "Codes: C - connected, S - static, R - RIP, O - OSPF, * - candidate default",
+            gw_line,
             ""
         ]
-        routes = self.device.get_all_routes()
         if not routes:
             lines.append("No active routes in routing table.")
         for r in routes:
             t = r["type"]
             net = r["network"]
             mask = r["mask"]
-            if r["next_hop"] == "directly connected":
-                lines.append(f"{t}    {net}/{mask} is directly connected, {r['interface']}")
+            prefix_len = bin(ip_to_int(mask)).count("1")
+            code = "S*" if (t == "S" and net == "0.0.0.0" and prefix_len == 0) else t
+            if r.get("next_hop") == "directly connected" or (not r.get("next_hop") and r.get("interface")):
+                target_if = r.get("interface")
+                lines.append(f"{code:<5}{net}/{prefix_len} is directly connected, {target_if}")
+            elif t == "R":
+                metric = r.get("metric", 1)
+                lines.append(f"{code:<5}{net}/{prefix_len} [120/{metric}] via {r['next_hop']}")
+            elif t == "O":
+                cost = r.get("cost", r.get("metric", 1))
+                lines.append(f"{code:<5}{net}/{prefix_len} [110/{cost}] via {r['next_hop']}")
             else:
-                lines.append(f"{t}    {net}/{mask} [1/0] via {r['next_hop']}")
+                lines.append(f"{code:<5}{net}/{prefix_len} [1/0] via {r['next_hop']}")
         return "\n".join(lines)
+
+    def _show_ip_rip(self):
+        if not isinstance(self.device, Router):
+            return "% RIP not supported on this device."
+        rip = self.device.rip
+        lines = [
+            f"RIP Version: {rip.version}",
+            f"RIP Enabled: {'Yes' if rip.enabled else 'No'}",
+            "Networks:"
+        ]
+        if rip.networks:
+            for net in sorted(rip.networks):
+                lines.append(f"  {net}")
+        else:
+            lines.append("  None")
+
+        lines.append("Neighbors:")
+        if rip.neighbors:
+            for n in sorted(rip.neighbors):
+                lines.append(f"  {n}")
+        else:
+            lines.append("  None")
+
+        lines.append("Learned Routes:")
+        if rip.routes:
+            for (net, mask), r in sorted(rip.routes.items(), key=lambda x: x[0]):
+                prefix_len = bin(ip_to_int(mask)).count("1")
+                lines.append(f"  {net}/{prefix_len} via {r['next_hop']} metric {r['metric']}")
+        else:
+            lines.append("  None")
+
+        return "\n".join(lines)
+
+    def _show_ip_ospf(self):
+        if not isinstance(self.device, Router):
+            return "% OSPF not supported on this device."
+        if not getattr(self.device, "ospf_enabled", False):
+            return "OSPF process not running."
+        ospf = self.device.ospf
+        participating = ospf.get_participating_interfaces()
+        intf_names = " ".join(p.name for p in participating) if participating else "None"
+        active_nbrs = len([n for n in ospf.neighbors.values() if n.state == "FULL"])
+        lines = [
+            f' Routing Process "ospf {ospf.process_id}" with ID {ospf.get_router_id()}',
+            f" Supports only single TOS(TOS0) routes",
+            f" Supports opaque LSA",
+            f" SPF schedule delay 5 secs, Hold time between two SPFs 10 secs",
+            f" Number of DCbitless external LSA 0",
+            f" Number of DoNotAge external LSA 0",
+            f" Number of areas in this router is 1. 1 normal 0 stub 0 nssa",
+            f"    Area BACKBONE(0)",
+            f"        Number of interfaces in this area is {len(participating)}",
+            f"        Interfaces: {intf_names}",
+            f"        Active neighbors: {active_nbrs}",
+            f"        SPF algorithm executed {ospf.spf_runs} times",
+        ]
+        return "\n".join(lines)
+
+    def _show_ip_ospf_neighbor(self):
+        if not isinstance(self.device, Router):
+            return "% OSPF not supported on this device."
+        if not getattr(self.device, "ospf_enabled", False):
+            return "OSPF process not running."
+        ospf = self.device.ospf
+        lines = [
+            f"{'Neighbor ID':<16}{'Pri':<6}{'State':<16}{'Dead Time':<12}{'Address':<16}{'Interface'}",
+            "-" * 80
+        ]
+        if not ospf.neighbors:
+            lines.append("No OSPF neighbors found.")
+        else:
+            for nbr_ip, nbr in sorted(ospf.neighbors.items()):
+                lines.append(f"{nbr.neighbor_id:<16}{nbr.priority:<6}{nbr.state:<16}{'00:00:35':<12}{nbr.neighbor_ip:<16}{nbr.local_if.name}")
+        return "\n".join(lines)
+
+    def _show_ip_ospf_database(self):
+        if not isinstance(self.device, Router):
+            return "% OSPF not supported on this device."
+        if not getattr(self.device, "ospf_enabled", False):
+            return "OSPF process not running."
+        ospf = self.device.ospf
+        lines = [
+            f"            OSPF Router with ID ({ospf.get_router_id()}) (Process ID {ospf.process_id})",
+            "",
+            f"                Router Link States (Area 0)",
+            "",
+            f"{'Link ID':<16}{'ADV Router':<16}{'Age':<8}{'Seq#':<14}{'Checksum':<10}{'Link count'}",
+            "-" * 76
+        ]
+        for rid, lsa in sorted(ospf.lsdb.items()):
+            seq_hex = f"0x{lsa.sequence:08x}"
+            lines.append(f"{rid:<16}{lsa.adv_router:<16}{lsa.age:<8}{seq_hex:<14}{'0x0042':<10}{len(lsa.links)}")
+        return "\n".join(lines)
+
+    def _show_ip_protocols(self):
+        if not isinstance(self.device, Router):
+            return "% Routing protocols not supported on this device."
+        has_rip = getattr(self.device, "rip_enabled", False)
+        has_ospf = getattr(self.device, "ospf_enabled", False)
+        if not has_rip and not has_ospf:
+            return "No routing protocols configured."
+
+        lines = ["*** IP Routing is NSF aware ***", ""]
+        if has_rip:
+            rip = self.device.rip
+            lines.extend([
+                'Routing Protocol is "rip"',
+                f"  Sending updates every 30 seconds, next due in 15 secs",
+                f"  Invalid after 180 seconds, hold down 180, flushed after 240",
+                f"  Outgoing update filter list for all interfaces is not set",
+                f"  Incoming update filter list for all interfaces is not set",
+                f"  Redistributing: rip",
+                f"  Default version control: send version {rip.version}, receive version {rip.version}",
+                f"    Interface             Send  Recv  Key-chain",
+            ])
+            for iface in rip.get_participating_interfaces():
+                lines.append(f"    {iface.name:<22}{rip.version:<6}{rip.version}")
+
+            lines.append("  Routing for Networks:")
+            for net in sorted(rip.networks):
+                lines.append(f"    {net}")
+
+            lines.append("  Routing Information Sources:")
+            lines.append("    Gateway         Distance      Last Update")
+            for n in sorted(rip.neighbors):
+                lines.append(f"    {n:<16}120           00:00:15")
+            lines.append("  Distance: (default is 120)")
+            lines.append("")
+
+        if has_ospf:
+            ospf = self.device.ospf
+            lines.extend([
+                f'Routing Protocol is "ospf {ospf.process_id}"',
+                f"  Outgoing update filter list for all interfaces is not set",
+                f"  Incoming update filter list for all interfaces is not set",
+                f"  Router ID {ospf.get_router_id()}",
+                f"  Number of areas in this router is 1. 1 normal 0 stub 0 nssa",
+                f"  Maximum path: 4",
+                f"  Routing for Networks:",
+            ])
+            for net, wc, area in ospf.networks:
+                lines.append(f"    {net} {wc} area {area}")
+            lines.append("  Routing Information Sources:")
+            lines.append("    Gateway         Distance      Last Update")
+            for nbr_ip, nbr in sorted(ospf.neighbors.items()):
+                lines.append(f"    {nbr.neighbor_id:<16}110           00:00:10")
+            lines.append("  Distance: (default is 110)")
+
+        return "\n".join(lines).strip()
 
     def _show_ip_nat_translations(self):
         lines = [
@@ -1235,6 +1737,11 @@ class CommandExecutor:
             lines.append(f"interface {port.full_name}")
             if port.mode == "trunk":
                 lines.append(" switchport mode trunk")
+                if getattr(port, "trunk_allowed_vlans", {1}) != {1}:
+                    from network.switch import format_vlan_ranges
+                    lines.append(f" switchport trunk allowed vlan {format_vlan_ranges(port.trunk_allowed_vlans)}")
+                if getattr(port, "native_vlan", 1) != 1:
+                    lines.append(f" switchport trunk native vlan {port.native_vlan}")
             elif isinstance(self.device, Switch) and port.access_vlan != 1:
                 lines.append(f" switchport access vlan {port.access_vlan}")
             if getattr(port, "ip_method", "manual") == "DHCP":
@@ -1285,7 +1792,21 @@ class CommandExecutor:
             for r in self.device.nat_rules:
                 lines.append(f"ip nat inside source list {r['acl']} interface {r['interface']} {r['type']}")
             for r in self.device.routes:
-                lines.append(f"ip route {r['network']} {r['mask']} {r['next_hop']}")
+                target = r.get("next_hop") or r.get("interface")
+                lines.append(f"ip route {r['network']} {r['mask']} {target}")
+            if getattr(self.device, "rip_enabled", False):
+                lines.append("router rip")
+                lines.append(f" version {self.device.rip_version}")
+                for net in sorted(self.device.rip_networks):
+                    lines.append(f" network {net}")
+                lines.append("!")
+            if getattr(self.device, "ospf_enabled", False):
+                lines.append(f"router ospf {self.device.ospf_process_id}")
+                if self.device.ospf.explicit_router_id:
+                    lines.append(f" router-id {self.device.ospf.explicit_router_id}")
+                for net_str, wc_str, area in self.device.ospf_networks:
+                    lines.append(f" network {net_str} {wc_str} area {area}")
+                lines.append("!")
 
         lines.append("end")
         return "\n".join(lines)
@@ -1415,17 +1936,11 @@ class CommandExecutor:
                 return f"dhclient: {msg}"
 
         elif v in ("help", "?", "--help"):
-            return (
-                "Supported Linux shell commands:\n"
-                "  ping [-c N] <ip>     Send ICMP ECHO_REQUEST to network hosts\n"
-                "  traceroute <ip>      Print the route packets trace to network host\n"
-                "  arp -a               Display current ARP table\n"
-                "  ifconfig             Display network interface configuration\n"
-                "  ip addr              Display network interface addresses and status\n"
-                "  dhclient             Acquire dynamic IP address via DHCP\n"
-                "  dhclient -r          Release acquired dynamic DHCP lease\n"
-                "  exit                 Close the terminal session"
-            )
+            from .command_parser import CommandParser
+            parser = getattr(self, "parser", None)
+            if parser is None:
+                parser = CommandParser(self)
+            return parser.get_help(v)
         return f"bash: {tokens[0]}: command not found"
 
     def parse_ping_job(self, cmd_line):

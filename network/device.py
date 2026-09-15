@@ -3,6 +3,7 @@ network/device.py - Base Device, Interface/Port models, and LED Status
 """
 
 import time
+import weakref
 
 class LEDState:
     OFF = "OFF"
@@ -39,6 +40,9 @@ class Port:
         self.stp_state = "Forwarding"   # Forwarding, Blocking, Listening, Learning, Disabled
         self.stp_role = "Designated"    # Root, Designated, Alternate, Disabled
         self.stp_cost = 4               # Default 802.1D path cost for 1000 Mbps (Gigabit)
+
+        # OSPF (Open Shortest Path First)
+        self.ospf_cost = 1              # Default OSPF interface cost
 
         # LED State
         self.last_traffic_time = 0.0
@@ -97,7 +101,10 @@ class Port:
 
 
 class BaseDevice:
+    _all_devices = weakref.WeakSet()
+
     def __init__(self, id, hostname, device_type="device", rack_id=1, u_slot=10):
+        BaseDevice._all_devices.add(self)
         self.id = id
         self.hostname = hostname
         self.device_type = device_type  # "router", "switch", "server", "laptop"

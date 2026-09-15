@@ -14,6 +14,58 @@ def normalize_mac(mac_str):
         return ":".join(clean[i:i+2] for i in range(0, 12, 2))
     return mac_str.lower()
 
+def format_vlan_ranges(vlan_iter):
+    """Formats an iterable of VLAN IDs into Cisco range notation (e.g. '1,10-12,20')."""
+    if not vlan_iter:
+        return "none"
+    try:
+        vlans = sorted(set(int(v) for v in vlan_iter if isinstance(v, (int, str)) and str(v).isdigit()))
+    except Exception:
+        return "none"
+    if not vlans:
+        return "none"
+    ranges = []
+    start = vlans[0]
+    end = vlans[0]
+    for v in vlans[1:]:
+        if v == end + 1:
+            end = v
+        else:
+            ranges.append(f"{start}-{end}" if start != end else f"{start}")
+            start = v
+            end = v
+    ranges.append(f"{start}-{end}" if start != end else f"{start}")
+    return ",".join(ranges)
+
+def parse_vlan_ranges(vlan_str):
+    """
+    Parses a string containing VLAN IDs and ranges (e.g. '10,20,30-35') into a set of ints.
+    Raises ValueError on invalid formats, out-of-bounds VLAN IDs (1-4094), or inverted ranges.
+    """
+    if not vlan_str or not vlan_str.strip():
+        return set()
+    clean = vlan_str.replace(" ", ",")
+    parts = [p.strip() for p in clean.split(",") if p.strip()]
+    vlans = set()
+    for part in parts:
+        if "-" in part:
+            sub = part.split("-")
+            if len(sub) != 2 or not sub[0].isdigit() or not sub[1].isdigit():
+                raise ValueError(f"Invalid VLAN range: {part}")
+            low, high = int(sub[0]), int(sub[1])
+            if low < 1 or high > 4094 or low > high:
+                raise ValueError(f"Invalid VLAN range: {part}")
+            for vid in range(low, high + 1):
+                vlans.add(vid)
+        else:
+            if not part.isdigit():
+                raise ValueError(f"Invalid VLAN ID: {part}")
+            vid = int(part)
+            if vid < 1 or vid > 4094:
+                raise ValueError(f"VLAN ID out of range (1-4094): {vid}")
+            vlans.add(vid)
+    return vlans
+
 class SVI:
     """
     Switch Virtual Interface (SVI) - A logical Layer 3 interface representing a VLAN.
@@ -83,6 +135,8 @@ class Switch(BaseDevice):
 
         # MAC Address Table: mac -> {"port": port_name, "vlan": vlan_id, "timestamp": float}
         self.mac_table = {}
+        # Per-VLAN MAC Table: (vlan_id, mac) -> {"port": port_name, "vlan": vlan_id, "timestamp": float}
+        self.mac_vlan_table = {}
 
         # STP (Spanning Tree Protocol - IEEE 802.1D)
         self.stp_enabled = True
@@ -383,18 +437,20 @@ class Switch(BaseDevice):
                         port_a.stp_state = "Blocking"
 
     def learn_mac(self, mac, port_name, vlan_id):
-        """Records source MAC in MAC table, respecting STP blocking state."""
+        """Records source MAC in MAC table and per-VLAN MAC table, respecting STP blocking state."""
         port = self.get_port(port_name)
         if port and self.stp_enabled and getattr(port, "stp_state", "Forwarding") == "Blocking":
             return
-        self.mac_table[mac] = {
+        entry = {
             "port": port_name,
             "vlan": vlan_id,
             "timestamp": time.time()
         }
+        self.mac_table[mac] = entry
+        self.mac_vlan_table[(vlan_id, mac)] = entry
 
     def forward_packet(self, in_port, src_mac, dst_mac, vlan_id):
-        """Simulates frame forwarding logic with MAC learning, STP blocking, and broadcast/unicast."""
+        """Simulates frame forwarding logic with per-VLAN MAC learning, STP blocking, and broadcast/unicast."""
         if self.stp_enabled:
             if self._stp_dirty or self.root_bridge_id is None:
                 self.recalculate_stp()
@@ -403,14 +459,21 @@ class Switch(BaseDevice):
         if self.stp_enabled and getattr(in_port, "stp_state", "Forwarding") == "Blocking":
             return []
 
-        # 1. Learn source MAC (only if port is in Forwarding state)
+        # 1. Ingress VLAN filtering on in_port
+        if in_port.mode == "access" and in_port.access_vlan != vlan_id:
+            return []
+        if in_port.mode == "trunk" and (vlan_id not in in_port.trunk_allowed_vlans):
+            return []
+
+        # 2. Learn source MAC (only if port is in Forwarding state)
         if (not self.stp_enabled) or getattr(in_port, "stp_state", "Forwarding") == "Forwarding":
             self.learn_mac(src_mac, in_port.name, vlan_id)
         in_port.trigger_traffic()
 
-        # 2. Check destination MAC
-        if dst_mac == "FF:FF:FF:FF:FF:FF" or dst_mac not in self.mac_table:
-            # Broadcast / Flood to all ports participating in this VLAN in Forwarding state
+        # 3. Check destination MAC per VLAN
+        vlan_mac_key = (vlan_id, dst_mac)
+        if dst_mac == "FF:FF:FF:FF:FF:FF" or vlan_mac_key not in self.mac_vlan_table:
+            # Broadcast / Unknown Unicast: flood to all ports participating in this VLAN in Forwarding state
             out_ports = []
             for p_name, port in self.ports.items():
                 if port == in_port or port.is_shutdown or not port.cable:
@@ -418,24 +481,24 @@ class Switch(BaseDevice):
                 # STP check
                 if self.stp_enabled and getattr(port, "stp_state", "Forwarding") != "Forwarding":
                     continue
-                # VLAN check
+                # Egress VLAN check
                 if port.mode == "access" and port.access_vlan == vlan_id:
                     out_ports.append(port)
-                elif port.mode == "trunk" and (vlan_id in port.trunk_allowed_vlans or not port.trunk_allowed_vlans):
+                elif port.mode == "trunk" and vlan_id in port.trunk_allowed_vlans:
                     out_ports.append(port)
             return out_ports
         else:
-            # Known unicast
-            entry = self.mac_table[dst_mac]
+            # Known unicast in this VLAN
+            entry = self.mac_vlan_table[vlan_mac_key]
             target_port_name = entry["port"]
             target_port = self.get_port(target_port_name)
             if target_port and not target_port.is_shutdown and target_port.cable:
                 # STP check
                 if self.stp_enabled and getattr(target_port, "stp_state", "Forwarding") != "Forwarding":
                     return []
-                # Check VLAN membership
+                # Egress VLAN check
                 if target_port.mode == "access" and target_port.access_vlan == vlan_id:
                     return [target_port]
-                elif target_port.mode == "trunk" and (vlan_id in target_port.trunk_allowed_vlans or not target_port.trunk_allowed_vlans):
+                elif target_port.mode == "trunk" and vlan_id in target_port.trunk_allowed_vlans:
                     return [target_port]
             return []

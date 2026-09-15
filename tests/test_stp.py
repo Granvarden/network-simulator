@@ -332,6 +332,7 @@ def test_8_vlan_and_stp():
     Cable(sw1.get_port("g0/1"), sw2.get_port("g0/1"), CableType.CAT6)
     Cable(sw1.get_port("g0/2"), sw3.get_port("g0/1"), CableType.CAT6)
     Cable(sw2.get_port("g0/2"), sw3.get_port("g0/2"), CableType.CAT6)
+    sw1.recalculate_stp()
 
     # PC-VLAN10 on SW1
     pc_v10_a = Host("pc_v10_a", hostname="PC_V10_A")

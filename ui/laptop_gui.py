@@ -547,7 +547,7 @@ class LaptopGUI:
         d_bg = (180, 45, 45) if d_hover else (38, 42, 48)
         pygame.draw.rect(self.surface, d_bg, d_rect, border_radius=4)
         pygame.draw.rect(self.surface, (70, 75, 85) if not d_hover else (220, 80, 80), d_rect, width=1, border_radius=4)
-        close_btn = self.font_sm.render("[ESC] Detach Laptop", True, (255, 255, 255) if d_hover else (180, 195, 210))
+        close_btn = self.font_sm.render("[ESC] Detach Laptop", True, (255, 255, 255) if d_hover else (240, 245, 255))
         self.surface.blit(close_btn, (d_rect.x + 12, d_rect.y + 2))
 
         # 2. Render OS Desktop Wallpaper
@@ -1023,8 +1023,8 @@ class LaptopGUI:
 
         cur_time = time.strftime("%H:%M")
         cur_date = time.strftime("%m/%d/%Y")
-        t_surf = self.font_sm.render(cur_time, True, (30, 35, 45))
-        d_surf = self.font_sm.render(cur_date, True, (90, 95, 105))
+        t_surf = self.font_sm.render(cur_time, True, (0, 0, 0))
+        d_surf = self.font_sm.render(cur_date, True, (0, 0, 0))
         self.surface.blit(t_surf, (dx + dw - 75, tb_r.y + 6))
         self.surface.blit(d_surf, (dx + dw - 75, tb_r.y + 22))
 
@@ -1173,7 +1173,7 @@ class LaptopGUI:
         if is_active:
             pygame.draw.rect(self.surface, (233, 84, 32), (rect.x - 5, rect.y + 14, 3, 12), border_radius=1)
 
-    def _render_window_frame(self, title_text, title_col=(30, 45, 60), bar_bg=(235, 242, 250)):
+    def _render_window_frame(self, title_text, title_col=(0, 0, 0), bar_bg=(235, 242, 250)):
         """Renders standard window chassis, titlebar, and close button."""
         W = self.layout["window_rect"]
         C = self.layout["window_close_btn"]
@@ -1215,7 +1215,7 @@ class LaptopGUI:
             pygame.draw.rect(self.surface, (45, 45, 52), W, width=1, border_radius=8)
 
             u_bar_bg = (38, 38, 44) if bar_bg == (235, 242, 250) else bar_bg
-            u_title_col = (240, 240, 245) if title_col == (30, 45, 60) else title_col
+            u_title_col = (240, 240, 245) if title_col in ((30, 45, 60), (0, 0, 0)) else title_col
             pygame.draw.rect(self.surface, u_bar_bg, (W.x, W.y, W.width, 32), border_top_left_radius=8, border_top_right_radius=8)
             pygame.draw.line(self.surface, (55, 55, 62), (W.x, W.y + 32), (W.right, W.y + 32), 1)
 
@@ -1255,7 +1255,7 @@ class LaptopGUI:
             is_h = rect.collidepoint(mx, my)
             if is_h:
                 pygame.draw.rect(self.surface, (225, 232, 242), rect, border_radius=4)
-            b_txt = self.font_md.render(lbl, True, (40, 55, 75) if is_h else (100, 115, 130))
+            b_txt = self.font_md.render(lbl, True, (0, 102, 204) if is_h else (0, 0, 0))
             self.surface.blit(b_txt, (rect.x + (rect.width - b_txt.get_width()) // 2, rect.y + 4))
 
         # URL Input Bar
@@ -1272,7 +1272,7 @@ class LaptopGUI:
         u_str = self.browser_input
         if self.browser_url_active and int(time.time() * 2) % 2 == 0:
             u_str += "|"
-        u_surf = self.font_mono.render(u_str, True, (20, 30, 45))
+        u_surf = self.font_mono.render(u_str, True, (0, 0, 0))
         self.surface.blit(u_surf, (u_rect.x + 24, u_rect.y + 6))
 
         # Go Button
@@ -1317,16 +1317,16 @@ class LaptopGUI:
 
         pygame.draw.rect(self.surface, bg, rect, border_radius=3)
         pygame.draw.rect(self.surface, border, rect, width=1, border_radius=3)
-        self.surface.blit(self.font_sm.render(title, True, (20, 35, 55) if is_hover else (45, 60, 80)), (rect.x + 6, rect.y + 3))
+        self.surface.blit(self.font_sm.render(title, True, (0, 102, 204) if is_hover else (0, 0, 0)), (rect.x + 6, rect.y + 3))
 
     def _render_browser_error(self, x, y, w, h):
-        self.surface.blit(self.font_lg.render("This site can't be reached", True, (40, 45, 55)), (x + 40, y + 40))
+        self.surface.blit(self.font_lg.render("This site can't be reached", True, (0, 0, 0)), (x + 40, y + 40))
         msg1 = f"{self.browser_url}'s server IP address could not be found or reached."
-        self.surface.blit(self.font_md.render(msg1, True, (90, 100, 115)), (x + 40, y + 75))
-        self.surface.blit(self.font_sm.render("Try:", True, (50, 60, 75)), (x + 40, y + 115))
-        self.surface.blit(self.font_sm.render(" * Checking your network cable connection ([F] Key)", True, (80, 90, 105)), (x + 60, y + 140))
-        self.surface.blit(self.font_sm.render(" * Checking IP address and Default Gateway in Network Settings", True, (80, 90, 105)), (x + 60, y + 165))
-        self.surface.blit(self.font_sm.render(" * Checking Cisco NAT / PAT overload configuration on Router-01", True, (80, 90, 105)), (x + 60, y + 190))
+        self.surface.blit(self.font_md.render(msg1, True, (0, 0, 0)), (x + 40, y + 75))
+        self.surface.blit(self.font_sm.render("Try:", True, (0, 0, 0)), (x + 40, y + 115))
+        self.surface.blit(self.font_sm.render(" * Checking your network cable connection ([F] Key)", True, (0, 0, 0)), (x + 60, y + 140))
+        self.surface.blit(self.font_sm.render(" * Checking IP address and Default Gateway in Network Settings", True, (0, 0, 0)), (x + 60, y + 165))
+        self.surface.blit(self.font_sm.render(" * Checking Cisco NAT / PAT overload configuration on Router-01", True, (0, 0, 0)), (x + 60, y + 190))
         self.surface.blit(self.font_mono.render("ERR_CONNECTION_TIMED_OUT", True, (180, 40, 40)), (x + 40, y + 230))
 
     def _render_cisco_router_web_page(self, x, y, w, h):
@@ -1337,8 +1337,8 @@ class LaptopGUI:
         pygame.draw.rect(self.surface, (245, 248, 252), (x + 25, y + 65, 380, 190), border_radius=6)
         pygame.draw.rect(self.surface, (215, 225, 238), (x + 25, y + 65, 380, 190), width=1, border_radius=6)
         self.surface.blit(self.font_md.render("System Overview", True, (15, 45, 90)), (x + 40, y + 75))
-        self.surface.blit(self.font_sm.render("Hostname: Router-01 (Cisco IOS-XE 17.3.4)", True, (50, 60, 75)), (x + 40, y + 105))
-        self.surface.blit(self.font_sm.render("Uptime: 2 days, 14 hours, 32 mins", True, (50, 60, 75)), (x + 40, y + 130))
+        self.surface.blit(self.font_sm.render("Hostname: Router-01 (Cisco IOS-XE 17.3.4)", True, (0, 0, 0)), (x + 40, y + 105))
+        self.surface.blit(self.font_sm.render("Uptime: 2 days, 14 hours, 32 mins", True, (0, 0, 0)), (x + 40, y + 130))
         self.surface.blit(self.font_sm.render("CPU Utilization: 6%   |   Memory Usage: 22%", True, (10, 140, 60)), (x + 40, y + 155))
         self.surface.blit(self.font_sm.render("NAT Engine: Overload Active (Inside: g0/0, Outside: g0/1)", True, (0, 110, 220)), (x + 40, y + 180))
 
@@ -1348,18 +1348,18 @@ class LaptopGUI:
         self.surface.blit(self.font_md.render("Port Status Summary", True, (15, 45, 90)), (x + 435, y + 75))
         self.surface.blit(self.font_mono.render("GigabitEthernet0/0:  192.168.1.1/24  [UP]", True, (10, 140, 50)), (x + 435, y + 105))
         self.surface.blit(self.font_mono.render("GigabitEthernet0/1:  203.0.113.2/24 [UP]", True, (10, 140, 50)), (x + 435, y + 130))
-        self.surface.blit(self.font_mono.render("Default Route:      via 203.0.113.1 (ISP)", True, (30, 45, 60)), (x + 435, y + 155))
+        self.surface.blit(self.font_mono.render("Default Route:      via 203.0.113.1 (ISP)", True, (0, 0, 0)), (x + 435, y + 155))
 
     def _render_web_server_page(self, x, y, w, h):
         pygame.draw.rect(self.surface, (30, 40, 55), (x, y, w, 50))
         self.surface.blit(self.font_lg.render("Enterprise Datacenter Intranet Portal - Web-Server-01", True, (255, 255, 255)), (x + 25, y + 14))
 
         pygame.draw.rect(self.surface, (240, 245, 252), (x + 30, y + 65, w - 60, 220), border_radius=8)
-        self.surface.blit(self.font_md.render("Welcome to Internal Corporate Services", True, (20, 40, 70)), (x + 50, y + 80))
-        self.surface.blit(self.font_sm.render("Host: Web-Server-01.corp.internal  (IP: 192.168.1.10)", True, (60, 75, 95)), (x + 50, y + 110))
-        self.surface.blit(self.font_sm.render("Nginx Version: 1.24.0 (Ubuntu Linux)", True, (60, 75, 95)), (x + 50, y + 135))
+        self.surface.blit(self.font_md.render("Welcome to Internal Corporate Services", True, (0, 0, 0)), (x + 50, y + 80))
+        self.surface.blit(self.font_sm.render("Host: Web-Server-01.corp.internal  (IP: 192.168.1.10)", True, (0, 0, 0)), (x + 50, y + 110))
+        self.surface.blit(self.font_sm.render("Nginx Version: 1.24.0 (Ubuntu Linux)", True, (0, 0, 0)), (x + 50, y + 135))
         self.surface.blit(self.font_sm.render("Status: HTTP 200 OK  |  Database Cluster: CONNECTED", True, (10, 140, 50)), (x + 50, y + 160))
-        self.surface.blit(self.font_sm.render("Active Services: ERP, CRM, Active Directory Sync, Gitlab", True, (30, 50, 75)), (x + 50, y + 185))
+        self.surface.blit(self.font_sm.render("Active Services: ERP, CRM, Active Directory Sync, Gitlab", True, (0, 0, 0)), (x + 50, y + 185))
 
     def _render_asa_web_page(self, x, y, w, h):
         pygame.draw.rect(self.surface, (140, 20, 30), (x, y, w, 50))
@@ -1367,10 +1367,10 @@ class LaptopGUI:
 
         pygame.draw.rect(self.surface, (252, 245, 245), (x + 30, y + 65, w - 60, 220), border_radius=8)
         self.surface.blit(self.font_md.render("Cisco ASA 5506-X Threat Defense", True, (120, 20, 30)), (x + 50, y + 80))
-        self.surface.blit(self.font_sm.render("Management IP: 203.0.113.1  |  Status: ACTIVE", True, (50, 60, 75)), (x + 50, y + 110))
+        self.surface.blit(self.font_sm.render("Management IP: 203.0.113.1  |  Status: ACTIVE", True, (0, 0, 0)), (x + 50, y + 110))
         self.surface.blit(self.font_sm.render("Security Zones: inside (sec: 100), outside (sec: 0), dmz (sec: 50)", True, (10, 130, 50)), (x + 50, y + 135))
         self.surface.blit(self.font_sm.render("Stateful Packet Inspection: ENABLED", True, (10, 130, 50)), (x + 50, y + 160))
-        self.surface.blit(self.font_sm.render("Active Inbound ACL: OUTSIDE_IN applied on interface outside", True, (30, 45, 60)), (x + 50, y + 185))
+        self.surface.blit(self.font_sm.render("Active Inbound ACL: OUTSIDE_IN applied on interface outside", True, (0, 0, 0)), (x + 50, y + 185))
 
     def _render_google_page(self, x, y, w, h):
         cx = x + w // 2
@@ -1378,13 +1378,13 @@ class LaptopGUI:
         sbox = pygame.Rect(cx - 180, y + 95, 360, 34)
         pygame.draw.rect(self.surface, (255, 255, 255), sbox, border_radius=17)
         pygame.draw.rect(self.surface, (210, 220, 230), sbox, width=1, border_radius=17)
-        self.surface.blit(self.font_sm.render("Search Google or type a URL", True, (150, 160, 175)), (cx - 150, y + 104))
+        self.surface.blit(self.font_sm.render("Search Google or type a URL", True, (0, 0, 0)), (cx - 150, y + 104))
 
         badge = pygame.Rect(cx - 210, y + 165, 420, 48)
         pygame.draw.rect(self.surface, (235, 248, 238), badge, border_radius=8)
         pygame.draw.rect(self.surface, (150, 210, 160), badge, width=1, border_radius=8)
         self.surface.blit(self.font_md.render("Internet Connection: ONLINE", True, (15, 130, 50)), (cx - 190, y + 172))
-        self.surface.blit(self.font_sm.render("Public IP Translation: 203.0.113.2 via Cisco NAT Overload (PAT)", True, (60, 80, 95)), (cx - 190, y + 192))
+        self.surface.blit(self.font_sm.render("Public IP Translation: 203.0.113.2 via Cisco NAT Overload (PAT)", True, (0, 0, 0)), (cx - 190, y + 192))
 
     def _render_network_window(self):
         N = self.layout["network"]
@@ -1400,7 +1400,7 @@ class LaptopGUI:
         stat_col = (10, 140, 50) if is_up else (190, 40, 40)
         stat_txt = "Connected (1000 Mbps Full Duplex)" if is_up else "Cable Unplugged (Link Down)"
         pygame.draw.rect(self.surface, (242, 246, 252), (W.x + 30, W.y + 44, W.width - 60, 56), border_radius=6)
-        self.surface.blit(self.font_md.render("Adapter: Intel(R) Gigabit Ethernet (eth0)", True, (25, 35, 50)), (W.x + 45, W.y + 50))
+        self.surface.blit(self.font_md.render("Adapter: Intel(R) Gigabit Ethernet (eth0)", True, (0, 0, 0)), (W.x + 45, W.y + 50))
         self.surface.blit(self.font_sm.render(f"Physical Status: {stat_txt}", True, stat_col), (W.x + 45, W.y + 74))
 
         # Form Fields
@@ -1412,7 +1412,7 @@ class LaptopGUI:
         ]
 
         for lbl, val, f_id, f_rect in fields:
-            self.surface.blit(self.font_md.render(lbl, True, (40, 50, 65)), (W.x + 35, f_rect.y + 6))
+            self.surface.blit(self.font_md.render(lbl, True, (0, 0, 0)), (W.x + 35, f_rect.y + 6))
             is_active = (self.active_field == f_id)
             is_hover = f_rect.collidepoint(mx, my)
             border_c = (0, 115, 230) if is_active else ((150, 180, 210) if is_hover else (200, 210, 225))
@@ -1423,7 +1423,7 @@ class LaptopGUI:
             v_str = val
             if is_active and int(time.time() * 2) % 2 == 0:
                 v_str += "|"
-            self.surface.blit(self.font_mono.render(v_str, True, (20, 30, 40)), (f_rect.x + 8, f_rect.y + 7))
+            self.surface.blit(self.font_mono.render(v_str, True, (0, 0, 0)), (f_rect.x + 8, f_rect.y + 7))
 
         # Apply Changes Button
         btn_r = N["btn_apply"]
@@ -1456,7 +1456,7 @@ class LaptopGUI:
             self.surface.blit(self.font_lg.render(t_err, True, (200, 30, 30)), (diag.x + 30, diag.y + 25))
             lines = self.putty_error_msg.split("\n")
             for i, l in enumerate(lines[1:]):
-                self.surface.blit(self.font_sm.render(l, True, (50, 60, 75)), (diag.x + 30, diag.y + 65 + i * 22))
+                self.surface.blit(self.font_sm.render(l, True, (0, 0, 0)), (diag.x + 30, diag.y + 65 + i * 22))
 
             # Retry Button
             r_rect = P["retry_btn"]

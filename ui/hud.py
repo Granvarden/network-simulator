@@ -266,7 +266,7 @@ class HUD:
         ]
         curr_y = y + 34
         for line in info_lines:
-            s = self.font_main.render(line, True, (45, 60, 80))
+            s = self.font_main.render(line, True, (0, 0, 0))
             surface.blit(s, (x + 12, curr_y))
             curr_y += 18
 
@@ -278,21 +278,21 @@ class HUD:
 
         curr_y += 4
         # CPU Gauge Bar
-        cpu_lbl = self.font_small.render(f"CPU: {cpu_load}%", True, (60, 75, 95))
+        cpu_lbl = self.font_small.render(f"CPU: {cpu_load}%", True, (0, 0, 0))
         surface.blit(cpu_lbl, (x + 12, curr_y))
         bar_w = 75
         pygame.draw.rect(surface, (230, 235, 245), (x + 75, curr_y + 3, bar_w, 8), border_radius=3)
         pygame.draw.rect(surface, (0, 130, 230), (x + 75, curr_y + 3, int(bar_w * (cpu_load / 100.0)), 8), border_radius=3)
 
         # RAM Gauge Bar
-        ram_lbl = self.font_small.render(f"RAM: {ram_gb:.1f}/{ram_total}GB", True, (60, 75, 95))
+        ram_lbl = self.font_small.render(f"RAM: {ram_gb:.1f}/{ram_total}GB", True, (0, 0, 0))
         surface.blit(ram_lbl, (x + 170, curr_y))
         pygame.draw.rect(surface, (230, 235, 245), (x + 252, curr_y + 3, bar_w, 8), border_radius=3)
         pygame.draw.rect(surface, (16, 165, 80), (x + 252, curr_y + 3, int(bar_w * (ram_gb / ram_total)), 8), border_radius=3)
 
         # Mini Port Status Matrix (Small labeled socket indicators)
         curr_y += 24
-        lbl_p = self.font_small.render("PORT LED MATRIX:", True, (90, 105, 125))
+        lbl_p = self.font_small.render("PORT LED MATRIX:", True, (0, 0, 0))
         surface.blit(lbl_p, (x + 12, curr_y))
         curr_y += 16
 
@@ -380,7 +380,7 @@ class HUD:
                 fill_color = (15, 170, 75) if pct >= 1.0 else (0, 125, 230)
                 pygame.draw.rect(surface, fill_color, (x + 12, curr_y, fill_w, bar_h), border_radius=5)
 
-            prog_lbl = self.font_small.render(f"Progress: {int(pct*100)}% ({done_count}/{total_count} Objectives Done)", True, (70, 90, 115))
+            prog_lbl = self.font_small.render(f"Progress: {int(pct*100)}% ({done_count}/{total_count} Objectives Done)", True, (0, 0, 0))
             surface.blit(prog_lbl, (x + 12, curr_y + 12))
             curr_y += 30
 
@@ -394,7 +394,7 @@ class HUD:
 
         # Draw Checklist
         for is_done, item_lines in wrapped_checklist:
-            color = (14, 150, 65) if is_done else (40, 55, 75)
+            color = (14, 150, 65) if is_done else (0, 0, 0)
             for idx, il in enumerate(item_lines):
                 x_offset = 14 if idx == 0 else 32
                 i_surf = self.font_main.render(il, True, color)
@@ -405,7 +405,7 @@ class HUD:
 
         # Draw Hint
         for hl in hint_lines:
-            h_surf = self.font_mono.render(hl, True, (80, 105, 135))
+            h_surf = self.font_mono.render(hl, True, (0, 0, 0))
             surface.blit(h_surf, (x + 12, curr_y))
             curr_y += 20
 
@@ -437,7 +437,7 @@ class HUD:
 
         curr_y = y + 34
         for line in lines:
-            color = (10, 90, 170) if line and not line.startswith(" ") and ":" in line[:18] else (40, 58, 80)
+            color = (10, 90, 170) if line and not line.startswith(" ") and ":" in line[:18] else (0, 0, 0)
             lsurf = self.font_mono.render(line, True, color)
             surface.blit(lsurf, (x + pad, curr_y))
             curr_y += line_h
@@ -452,5 +452,5 @@ class HUD:
             controls = "[WASD] Move   [Ctrl] Crouch   [E] CLI   [F] Cable   [N] Rack Manager (Add/Remove)   [Del] Quick Delete   [M] 2D Map   [K] Save   [L] Load   [P] Pause"
         else:
             controls = "[WASD] Move   [Ctrl] Crouch   [Mouse] Look   [E] Terminal   [F] Cable Action   [O] Mission   [M] 2D Topology   [P] Pause Menu   [F11] Fullscreen"
-        ctrl_surf = self.font_main.render(controls, True, (50, 75, 105))
+        ctrl_surf = self.font_main.render(controls, True, (0, 0, 0))
         surface.blit(ctrl_surf, (20, screen_h - bar_h + 6))
